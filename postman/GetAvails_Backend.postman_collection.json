@@ -1,0 +1,842 @@
+{
+  "info": {
+    "_postman_id": "9f3c1b50-7e8a-4d9b-9c70-1b8a4f2c0a01",
+    "name": "GetAvails Backend API",
+    "description": "Authentication API for the GetAvails / ArtistBook backend.\n\n## Quick start\n\n1. Set the `base_url` collection variable (default: `http://localhost:8000`).\n2. Run **Auth — Registration → Register** with a fresh email.\n3. Copy the 6-digit OTP printed in the Django server console (dev uses the console email backend) into the `verification_otp` collection variable.\n4. Run **Auth — Registration → Verify Email** — this auto-saves `access_token`, `refresh_token`, and `user_email` to the collection.\n5. All subsequent requests pick up the stored tokens automatically.\n\n## Auto-saved variables\n\n| Variable | Set by |\n|---|---|\n| `access_token` | Login, Verify Email, Google Sign In, Refresh Token |\n| `refresh_token` | Login, Verify Email, Google Sign In, Refresh Token |\n| `reset_token` | Password Reset Verify |\n| `user_email` | Register, Login, Verify Email, Google Sign In |\n\n## Error response shape\n\nEvery error follows:\n```\n{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"<stable-string>\",\n    \"status\": <http-status>,\n    \"message\": \"<human readable>\",\n    \"details\": { ... }\n  }\n}\n```\nFrontend should switch on `error.code`. Notable codes: `email_not_verified` (login before OTP), `account_not_found` (Google sign-in for unknown identity), `authentication_failed`, `invalid`, `throttled`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
+    { "key": "refresh_token", "value": "", "type": "string" },
+    { "key": "reset_token", "value": "", "type": "string" },
+    { "key": "user_email", "value": "jane@example.com", "type": "string" },
+    { "key": "verification_otp", "value": "000000", "type": "string", "description": "Paste the 6-digit OTP shown in the Django console (dev) or sent by email (prod) before running Verify Email or Password Reset Verify." },
+    { "key": "artist_user_id", "value": "", "type": "string", "description": "User ID of an artist (the User PK, not ArtistProfile PK) — used for booking offer creation and public artist availability." },
+    { "key": "artist_profile_id", "value": "", "type": "string", "description": "ArtistProfile PK — used for catalog detail and favorites." },
+    { "key": "venue_id", "value": "", "type": "string" },
+    { "key": "conversation_id", "value": "", "type": "string" },
+    { "key": "offer_id", "value": "", "type": "string" },
+    { "key": "availability_date", "value": "2026-06-15", "type": "string" }
+  ],
+  "auth": { "type": "noauth" },
+  "item": [
+    {
+      "name": "Auth — Registration",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201 Created', () => pm.expect(pm.response.code).to.equal(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('success flag', () => pm.expect(body.success).to.be.true);",
+                  "if (body.email) pm.collectionVariables.set('user_email', body.email);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"email\": \"{{user_email}}\",\n  \"password\": \"S3cure!Pass\",\n  \"role\": \"artist\"\n}"
+            },
+            "description": "Create a new account.\n\n**Body:** `name`, `email`, `password`, `role` (one of `artist`, `agent`, `talent_buyer`, `venue`, `organizer`).\n\n**Response 201:** `{ success, message, email }`. Account is created with `email_verified_at = null` and a 6-digit OTP is emailed. The user cannot log in until the OTP is verified."
+          }
+        },
+        {
+          "name": "Verify Email (OTP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+                  "const body = pm.response.json();",
+                  "if (body.access) pm.collectionVariables.set('access_token', body.access);",
+                  "if (body.refresh) pm.collectionVariables.set('refresh_token', body.refresh);",
+                  "if (body.user && body.user.email) pm.collectionVariables.set('user_email', body.user.email);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register/verify/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register", "verify", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"otp\": \"{{verification_otp}}\"\n}"
+            },
+            "description": "Verify the email-verification OTP. On success the account is marked verified and JWT tokens are issued — this is when the frontend should navigate to **\"You're all set!\"**.\n\n**Set `verification_otp`** in the collection variables before running this (read it from the Django runserver console in dev).\n\n**Response 200:** `{ success, message, user, access, refresh }`. Tokens are saved automatically by the test script."
+          }
+        },
+        {
+          "name": "Resend Verification OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register/resend/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register", "resend", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\"\n}"
+            },
+            "description": "Resend the verification OTP to an unverified account.\n\n**Response 200** (always, even if the account doesn't exist or is already verified — does not leak account state).\n\nA 60-second resend cooldown is enforced server-side; calling too quickly returns a `Throttled` error."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Login",
+      "item": [
+        {
+          "name": "Login (Email + Password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+                  "const body = pm.response.json();",
+                  "if (body.access) pm.collectionVariables.set('access_token', body.access);",
+                  "if (body.refresh) pm.collectionVariables.set('refresh_token', body.refresh);",
+                  "if (body.user && body.user.email) pm.collectionVariables.set('user_email', body.user.email);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"S3cure!Pass\",\n  \"remember_me\": true\n}"
+            },
+            "description": "Email + password login.\n\n`remember_me=true` extends refresh-token TTL to `JWT_REMEMBER_ME_REFRESH_TTL_DAYS` (default 30 days) instead of the default 1 day.\n\n**Response 200:** `{ success, user, access, refresh }`.\n\n**403 with `error.code = email_not_verified`** if the account hasn't completed OTP verification — frontend should route to the Verification Code screen."
+          }
+        },
+        {
+          "name": "Google Sign In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 404', () => pm.expect([200, 404]).to.include(pm.response.code));",
+                  "const body = pm.response.json();",
+                  "if (body.success) {",
+                  "  if (body.access) pm.collectionVariables.set('access_token', body.access);",
+                  "  if (body.refresh) pm.collectionVariables.set('refresh_token', body.refresh);",
+                  "  if (body.user && body.user.email) pm.collectionVariables.set('user_email', body.user.email);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/google/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "google", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"<paste-google-id-token-here>\"\n}"
+            },
+            "description": "Sign in with a Google ID token (SPA pattern — frontend obtains the token from Google's library and posts it here).\n\nNew Google identities are **rejected** with `404 account_not_found`; the frontend should redirect to Sign Up. Existing email accounts get their `google_sub` auto-linked on first successful Google login.\n\n**Response 200:** `{ success, user, access, refresh }`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Tokens & Profile",
+      "item": [
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+                  "const body = pm.response.json();",
+                  "if (body.access) pm.collectionVariables.set('access_token', body.access);",
+                  "if (body.refresh) pm.collectionVariables.set('refresh_token', body.refresh);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/refresh/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "refresh", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "description": "Exchange a valid refresh token for a new access (and refresh) token. Refresh-token rotation is enabled, so the old refresh is blacklisted on success."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "description": "Blacklist the refresh token so it can't be reused. Returns **205 Reset Content** on success."
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/me/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "me", ""]
+            },
+            "description": "Return the currently authenticated user's profile.\n\n**Response 200:** `{ success, user: { id, email, name, role, image, email_verified_at, is_staff, created_at } }`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth — Password Reset",
+      "item": [
+        {
+          "name": "Request Reset",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/password-reset/request/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "password-reset", "request", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\"\n}"
+            },
+            "description": "Step 1 — send a 6-digit reset OTP to the provided email.\n\nReturns **200** unconditionally (never reveals whether the email is registered). 60-second resend cooldown applies."
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.expect(pm.response.code).to.equal(200));",
+                  "const body = pm.response.json();",
+                  "if (body.reset_token) pm.collectionVariables.set('reset_token', body.reset_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/password-reset/verify/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "password-reset", "verify", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"otp\": \"{{verification_otp}}\"\n}"
+            },
+            "description": "Step 2 — verify the OTP. On success returns a short-lived (10 min), single-use, signed `reset_token` that authorizes the next step.\n\nThe test script saves `reset_token` to the collection automatically.\n\n**Set `verification_otp`** in collection variables before running this."
+          }
+        },
+        {
+          "name": "Confirm Reset",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/password-reset/confirm/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "password-reset", "confirm", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reset_token\": \"{{reset_token}}\",\n  \"new_password\": \"NewS3cure!Pass\",\n  \"confirm_password\": \"NewS3cure!Pass\"\n}"
+            },
+            "description": "Step 3 — set the new password.\n\nOn success, **all outstanding refresh tokens for the user are blacklisted** (forces re-login on every device). The reset token is also invalidated by the password change (its fingerprint is tied to the old password hash)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "Update Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/me/", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Daiane Dany\",\n  \"phone\": \"+1 (555) 123-4567\"\n}" },
+            "description": "Update name, phone, and avatar (use multipart/form-data with `image` field for file uploads). Only the provided fields are touched."
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/me/change-password/", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me", "change-password", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"current_password\": \"S3cure!Pass\",\n  \"new_password\": \"NewS3cure!Pass\",\n  \"confirm_password\": \"NewS3cure!Pass\"\n}" },
+            "description": "Change password while logged in. All existing refresh tokens are blacklisted — user must log in again."
+          }
+        },
+        {
+          "name": "Get Notification Preferences",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/me/notifications/", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me", "notifications", ""] }
+          }
+        },
+        {
+          "name": "Update Notification Preferences",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/me/notifications/", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me", "notifications", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"new_booking_requests\": true,\n  \"offer_responses\": true,\n  \"email_delivery_updates\": false\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog — Artists",
+      "item": [
+        {
+          "name": "List Genres",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/genres/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "genres", ""] }
+          }
+        },
+        {
+          "name": "Search Artists",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.results && body.results.length) {",
+                  "  pm.collectionVariables.set('artist_profile_id', body.results[0].id);",
+                  "  if (body.results[0].user) pm.collectionVariables.set('artist_user_id', body.results[0].user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/catalog/artists/?q=&genres=&radius_miles=&latitude=&longitude=&available_on=&favorites_only=false&limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "catalog", "artists", ""],
+              "query": [
+                { "key": "q", "value": "", "description": "Free-text search across name/bio/location" },
+                { "key": "genres", "value": "", "description": "Comma-separated genre slugs" },
+                { "key": "radius_miles", "value": "", "description": "Radius in miles (requires latitude+longitude)" },
+                { "key": "latitude", "value": "" },
+                { "key": "longitude", "value": "" },
+                { "key": "available_on", "value": "", "description": "ISO date — only artists not booked/soft-held that day" },
+                { "key": "favorites_only", "value": "false", "description": "Auth required when true" },
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            },
+            "description": "Search and filter the artist catalog. Test script saves the first result's IDs to `artist_profile_id` and `artist_user_id`."
+          }
+        },
+        {
+          "name": "Artist Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/artists/{{artist_profile_id}}/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "artists", "{{artist_profile_id}}", ""] }
+          }
+        },
+        {
+          "name": "Get My Artist Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/artists/me/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "artists", "me", ""] },
+            "description": "Returns (or creates) the ArtistProfile for the authenticated user. Only works when the user's role is `artist`."
+          }
+        },
+        {
+          "name": "Update My Artist Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/artists/me/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "artists", "me", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"bio\": \"Multi-genre singer-songwriter\",\n  \"location\": \"Los Angeles, CA\",\n  \"latitude\": 34.0522,\n  \"longitude\": -118.2437,\n  \"experience_years\": 8,\n  \"languages\": [\"English\", \"Spanish\"],\n  \"base_price_cents\": 500000,\n  \"genre_ids\": [],\n  \"is_published\": true\n}" }
+          }
+        },
+        {
+          "name": "List Favorites",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/favorites/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "favorites", ""] }
+          }
+        },
+        {
+          "name": "Add Favorite",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/favorites/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "favorites", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"artist_id\": {{artist_profile_id}}\n}" }
+          }
+        },
+        {
+          "name": "Remove Favorite",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/favorites/{{artist_profile_id}}/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "favorites", "{{artist_profile_id}}", ""] }
+          }
+        },
+        {
+          "name": "Recent Searches",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/recent-searches/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "recent-searches", ""] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog — Venues",
+      "item": [
+        {
+          "name": "Search Venues",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/catalog/venues/?q=&radius_miles=&latitude=&longitude=&limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "catalog", "venues", ""],
+              "query": [
+                { "key": "q", "value": "" },
+                { "key": "radius_miles", "value": "" },
+                { "key": "latitude", "value": "" },
+                { "key": "longitude", "value": "" },
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Venue Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/venues/{{venue_id}}/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "venues", "{{venue_id}}", ""] }
+          }
+        },
+        {
+          "name": "Get My Venue Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/venues/me/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "venues", "me", ""] }
+          }
+        },
+        {
+          "name": "Update My Venue Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/catalog/venues/me/", "host": ["{{base_url}}"], "path": ["api", "v1", "catalog", "venues", "me", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"description\": \"Premium concert hall\",\n  \"address\": \"123 Main St\",\n  \"location\": \"New York, NY\",\n  \"capacity\": 1500,\n  \"website\": \"https://example.com\",\n  \"is_published\": true\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bookings — Availability",
+      "item": [
+        {
+          "name": "Get My Availability",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/availability/?start=&end=",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "bookings", "availability", ""],
+              "query": [
+                { "key": "start", "value": "", "description": "ISO date" },
+                { "key": "end", "value": "" }
+              ]
+            },
+            "description": "Artist's own availability slots. Empty list means everything is implicitly Available."
+          }
+        },
+        {
+          "name": "Set Availability Slot",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/availability/", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "availability", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"date\": \"{{availability_date}}\",\n  \"status\": \"soft_hold\",\n  \"note\": \"Tentative — venue X\"\n}" },
+            "description": "Status ∈ `available | soft_hold | booked`. Upserts (one slot per (artist, date))."
+          }
+        },
+        {
+          "name": "Delete Availability Slot",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/availability/{{availability_date}}/", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "availability", "{{availability_date}}", ""] }
+          }
+        },
+        {
+          "name": "Public Artist Availability",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/artists/{{artist_user_id}}/availability/?start=&end=",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "bookings", "artists", "{{artist_user_id}}", "availability", ""],
+              "query": [
+                { "key": "start", "value": "" },
+                { "key": "end", "value": "" }
+              ]
+            },
+            "description": "Used by the artist profile page to render the booking calendar."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bookings — Offers",
+      "item": [
+        {
+          "name": "Create Booking Offer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.offer && body.offer.id) pm.collectionVariables.set('offer_id', body.offer.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/offers/", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "offers", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"artist_id\": {{artist_user_id}},\n  \"title\": \"Summer Music Festival\",\n  \"event_date\": \"2026-06-15\",\n  \"event_time\": \"19:00:00\",\n  \"venue_name\": \"Central Park Arena\",\n  \"address\": \"Central Park, NYC\",\n  \"amount_cents\": 500000,\n  \"budget_min_cents\": 400000,\n  \"budget_max_cents\": 600000,\n  \"contact_name\": \"Kirito Kazuto\",\n  \"contact_email\": \"kirito@example.com\",\n  \"contact_phone\": \"+1 555-0100\",\n  \"notes\": \"Outdoor stage, please bring own monitors.\"\n}" },
+            "description": "Send a booking request from the current user (any role) to an artist. Body matches the booking modal in the UI. Saves the new offer's id to `offer_id`."
+          }
+        },
+        {
+          "name": "List Offers — Pending (Artist)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/offers/?scope=received&status=pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "bookings", "offers", ""],
+              "query": [
+                { "key": "scope", "value": "received", "description": "received | sent" },
+                { "key": "status", "value": "pending", "description": "pending | confirmed | past (only with scope=received)" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Offers — Confirmed (Artist)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/offers/?scope=received&status=confirmed",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "bookings", "offers", ""],
+              "query": [
+                { "key": "scope", "value": "received" },
+                { "key": "status", "value": "confirmed" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Offers — Past (Artist)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/offers/?scope=received&status=past",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "bookings", "offers", ""],
+              "query": [
+                { "key": "scope", "value": "received" },
+                { "key": "status", "value": "past" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Offers — Sent (Buyer/Agent/Venue)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/offers/?scope=sent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "bookings", "offers", ""],
+              "query": [{ "key": "scope", "value": "sent" }]
+            }
+          }
+        },
+        {
+          "name": "Accept Offer",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/offers/{{offer_id}}/accept/", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "offers", "{{offer_id}}", "accept", ""] },
+            "description": "Artist accepts an offer. Auto-flips the AvailabilitySlot for that date to `booked` and writes activity rows for both parties."
+          }
+        },
+        {
+          "name": "Reject Offer",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/offers/{{offer_id}}/reject/", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "offers", "{{offer_id}}", "reject", ""] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard & Activity",
+      "item": [
+        {
+          "name": "Artist Dashboard",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/dashboard/", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "dashboard", ""] },
+            "description": "KPIs (active offers, confirmed bookings, total earnings cents, growth %), incoming offers, upcoming bookings, recent activity. Drives the Welcome Back screen."
+          }
+        },
+        {
+          "name": "Activity Feed",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/bookings/activity/?limit=20&offset=0", "host": ["{{base_url}}"], "path": ["api", "v1", "bookings", "activity", ""], "query": [{ "key": "limit", "value": "20" }, { "key": "offset", "value": "0" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Messaging",
+      "item": [
+        {
+          "name": "List Conversations",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/messaging/conversations/?q=&limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "messaging", "conversations", ""],
+              "query": [
+                { "key": "q", "value": "", "description": "Filter by participant name" },
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            },
+            "description": "Each result includes the other participant, online status (last_seen within 5 min), last message preview, and unread count."
+          }
+        },
+        {
+          "name": "Start / Get Conversation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.conversation && body.conversation.id) pm.collectionVariables.set('conversation_id', body.conversation.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/messaging/conversations/", "host": ["{{base_url}}"], "path": ["api", "v1", "messaging", "conversations", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": {{artist_user_id}}\n}" },
+            "description": "Returns existing 1-to-1 conversation with the target user, or creates one. Save the id to `conversation_id`."
+          }
+        },
+        {
+          "name": "Conversation Detail",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/messaging/conversations/{{conversation_id}}/", "host": ["{{base_url}}"], "path": ["api", "v1", "messaging", "conversations", "{{conversation_id}}", ""] }
+          }
+        },
+        {
+          "name": "List Messages",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/messaging/conversations/{{conversation_id}}/messages/?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "messaging", "conversations", "{{conversation_id}}", "messages", ""],
+              "query": [{ "key": "limit", "value": "20" }, { "key": "offset", "value": "0" }]
+            }
+          }
+        },
+        {
+          "name": "Send Message (text)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/messaging/conversations/{{conversation_id}}/messages/", "host": ["{{base_url}}"], "path": ["api", "v1", "messaging", "conversations", "{{conversation_id}}", "messages", ""] },
+            "body": { "mode": "raw", "raw": "{\n  \"body\": \"Hi! Thanks for reaching out. I'd love to discuss your event.\"\n}" }
+          }
+        },
+        {
+          "name": "Send Message (with files)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/messaging/conversations/{{conversation_id}}/messages/", "host": ["{{base_url}}"], "path": ["api", "v1", "messaging", "conversations", "{{conversation_id}}", "messages", ""] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "body", "value": "Here's the contract.", "type": "text" },
+                { "key": "files", "type": "file", "src": [], "description": "Attach one or more files. Image MIME types are auto-classified as kind=image, others as kind=file." }
+              ]
+            },
+            "description": "Multipart upload. Image files become kind=image attachments; other types become kind=file."
+          }
+        },
+        {
+          "name": "Mark Conversation Read",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/messaging/conversations/{{conversation_id}}/read/", "host": ["{{base_url}}"], "path": ["api", "v1", "messaging", "conversations", "{{conversation_id}}", "read", ""] }
+          }
+        }
+      ]
+    }
+  ]
+}
