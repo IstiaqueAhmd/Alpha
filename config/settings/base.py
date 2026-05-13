@@ -158,7 +158,7 @@ DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@getavails.com")
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
-
+CORS_ALLOW_CREDENTIALS = True
 GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID", default="")
 
 LOGGING = {
