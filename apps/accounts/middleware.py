@@ -2,6 +2,8 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from .models import User
+
 
 class UpdateLastSeenMiddleware:
     """Update ``User.last_seen_at`` at most once per minute for authenticated requests."""
@@ -17,5 +19,5 @@ class UpdateLastSeenMiddleware:
         if user is not None and user.is_authenticated:
             now = timezone.now()
             if user.last_seen_at is None or (now - user.last_seen_at) >= self.UPDATE_INTERVAL:
-                type(user).objects.filter(pk=user.pk).update(last_seen_at=now)
+                User.objects.filter(pk=user.pk).update(last_seen_at=now)
         return response

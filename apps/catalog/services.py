@@ -186,6 +186,36 @@ class FavoritesService:
         )
 
 
+class SeatGeekService:
+    @staticmethod
+    def search_performers(*, query: str | None = None) -> QuerySet:
+        from apps.seatgeek.models import Performers
+        qs = Performers.objects.prefetch_related("performergenres_set").all()
+        if query:
+            qs = qs.filter(name__icontains=query)
+        return qs.order_by("name")
+
+    @staticmethod
+    def search_venues(
+        *,
+        query: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_miles: float | None = None,
+    ) -> QuerySet:
+        from apps.seatgeek.models import Venues
+        qs = Venues.objects.all()
+        if query:
+            qs = qs.filter(Q(name__icontains=query) | Q(city__icontains=query) | Q(address__icontains=query))
+        if latitude is not None and longitude is not None and radius_miles:
+            lat_min, lat_max, lng_min, lng_max = _bounding_box(latitude, longitude, radius_miles)
+            qs = qs.filter(
+                lat__gte=lat_min, lat__lte=lat_max,
+                long__gte=lng_min, long__lte=lng_max,
+            )
+        return qs.order_by("name")
+
+
 class RecentSearchService:
     MAX_HISTORY = 20
 

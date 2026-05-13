@@ -61,7 +61,7 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = RegistrationService.register(
+        user, otp = RegistrationService.register(
             **serializer.validated_data,
             ip_address=_client_ip(request),
         )
@@ -69,7 +69,7 @@ class RegisterView(APIView):
             {
                 "success": True,
                 "message": "Account created. Check your email for a 6-digit verification code.",
-                "email": user.email,
+                "email": user.email
             },
             status=status.HTTP_201_CREATED,
         )

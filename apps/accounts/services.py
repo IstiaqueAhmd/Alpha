@@ -34,7 +34,7 @@ class OTPService:
     """Issue, send, and verify single-use 6-digit email OTPs."""
 
     @classmethod
-    def issue_and_send(cls, *, user: User, purpose: str, ip_address: str | None = None) -> None:
+    def issue_and_send(cls, *, user: User, purpose: str, ip_address: str | None = None) -> str:
         latest = (
             EmailOTP.objects.filter(user=user, purpose=purpose)
             .order_by("-created_at")
@@ -57,6 +57,7 @@ class OTPService:
                 ip_address=ip_address,
             )
         send_otp_email(email=user.email, otp=otp_plain, purpose=purpose)
+        return otp_plain
 
     @classmethod
     def verify(cls, *, user: User, otp: str, purpose: str) -> EmailOTP:
@@ -136,7 +137,7 @@ class RegistrationService:
         password: str,
         role: str,
         ip_address: str | None = None,
-    ) -> User:
+    ) -> tuple[User, str]:
         email_normalized = email.lower().strip()
         if User.objects.filter(email__iexact=email_normalized).exists():
             raise ValidationError({"email": "An account with this email already exists."})
@@ -148,12 +149,12 @@ class RegistrationService:
             role=role,
             is_active=True,
         )
-        OTPService.issue_and_send(
+        otp = OTPService.issue_and_send(
             user=user,
             purpose=EmailOTP.Purpose.EMAIL_VERIFICATION,
             ip_address=ip_address,
         )
-        return user
+        return user, otp
 
     @classmethod
     def verify_email(cls, *, email: str, otp: str) -> User:

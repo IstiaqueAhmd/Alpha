@@ -4,12 +4,17 @@ from .base import BASE_DIR
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.sqlite3",
+#         "NAME": BASE_DIR / "db.sqlite3",
+#     }
+# }
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": env.db("DATABASE_URL"),
 }
+DATABASES["default"]["CONN_MAX_AGE"] = 60
 
 CACHES = {
     "default": {
@@ -18,6 +23,5 @@ CACHES = {
     }
 }
 
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 CORS_ALLOW_ALL_ORIGINS = True

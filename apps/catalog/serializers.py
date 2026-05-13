@@ -4,6 +4,8 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.serializers import UserSerializer
+from apps.seatgeek.models import Performers as SeatGeekPerformer
+from apps.seatgeek.models import Venues as SeatGeekVenue
 
 from .models import ArtistProfile, Favorite, Genre, RecentSearch, VenueProfile
 
@@ -185,3 +187,58 @@ class RecentSearchSerializer(serializers.ModelSerializer):
         model = RecentSearch
         fields = ("id", "query", "location", "radius_miles", "genres", "target_date", "created_at")
         read_only_fields = ("id", "created_at")
+
+
+class SeatGeekPerformerSerializer(serializers.ModelSerializer):
+    source = serializers.CharField(default="seatgeek", read_only=True)
+    genres = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SeatGeekPerformer
+        fields = (
+            "id",
+            "source",
+            "name",
+            "image",
+            "url",
+            "score",
+            "genres",
+            "provider_id",
+            "provider_name",
+            "created_at",
+        )
+
+    def get_genres(self, obj) -> list[str]:
+        # Use prefetched cache when available (set by SeatGeekService.search_performers).
+        cached = getattr(obj, "_prefetched_objects_cache", {}).get("performergenres_set")
+        if cached is not None:
+            return [pg.genre for pg in cached]
+        return list(obj.performergenres_set.values_list("genre", flat=True))
+
+
+class SeatGeekVenueSerializer(serializers.ModelSerializer):
+    source = serializers.CharField(default="seatgeek", read_only=True)
+    latitude = serializers.FloatField(source="lat")
+    longitude = serializers.FloatField(source="long")
+    website = serializers.CharField(source="provider_url")
+
+    class Meta:
+        model = SeatGeekVenue
+        fields = (
+            "id",
+            "source",
+            "name",
+            "address",
+            "city",
+            "state",
+            "postal_code",
+            "country",
+            "latitude",
+            "longitude",
+            "capacity",
+            "score",
+            "website",
+            "provider_id",
+            "provider_name",
+            "created_at",
+        )
