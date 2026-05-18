@@ -1,3 +1,4 @@
+from datetime import date as date_cls
 from datetime import timedelta
 
 from django.utils import timezone
@@ -9,9 +10,7 @@ from apps.seatgeek.models import Venues as SeatGeekVenue
 
 from .models import ArtistProfile, Favorite, Genre, RecentSearch, VenueProfile
 
-UPCOMING_AVAILABLE_LIMIT = 14
-UPCOMING_BOOKED_LIMIT = 14
-UPCOMING_WINDOW_DAYS = 60
+AVAILABILITY_WINDOW_DAYS = 365
 
 
 class GenreSerializer(serializers.ModelSerializer):
@@ -24,8 +23,8 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     genres = GenreSerializer(many=True, read_only=True)
     is_favorited = serializers.SerializerMethodField()
-    upcoming_availability = serializers.SerializerMethodField()
-    upcoming_booked_dates = serializers.SerializerMethodField()
+    booked_dates = serializers.SerializerMethodField()
+    available_ranges = serializers.SerializerMethodField()
 
     class Meta:
         model = ArtistProfile
@@ -43,16 +42,16 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
             "genres",
             "is_published",
             "is_favorited",
-            "upcoming_availability",
-            "upcoming_booked_dates",
+            "booked_dates",
+            "available_ranges",
             "created_at",
         )
         read_only_fields = (
             "id",
             "user",
             "is_favorited",
-            "upcoming_availability",
-            "upcoming_booked_dates",
+            "booked_dates",
+            "available_ranges",
             "created_at",
         )
 
@@ -62,47 +61,52 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
             return False
         return Favorite.objects.filter(user=request.user, artist=obj).exists()
 
-    def get_upcoming_availability(self, obj) -> list[dict]:
-        """Next free dates within the upcoming window (excluding booked + soft_hold)."""
+    def get_booked_dates(self, obj) -> list[dict]:
         from apps.bookings.models import AvailabilitySlot
 
-        slots = self._upcoming_slots(obj)
-        blocked = {
-            s.date for s in slots
-            if s.status in (AvailabilitySlot.Status.BOOKED, AvailabilitySlot.Status.SOFT_HOLD)
-        }
-
-        today = timezone.now().date()
-        result: list[dict] = []
-        cursor = today
-        end = today + timedelta(days=UPCOMING_WINDOW_DAYS)
-        while cursor <= end and len(result) < UPCOMING_AVAILABLE_LIMIT:
-            if cursor not in blocked:
-                result.append({
-                    "date": cursor.isoformat(),
-                    "weekday": cursor.strftime("%a"),
-                })
-            cursor += timedelta(days=1)
-        return result
-
-    def get_upcoming_booked_dates(self, obj) -> list[dict]:
-        from apps.bookings.models import AvailabilitySlot
-
-        booked = [s for s in self._upcoming_slots(obj) if s.status == AvailabilitySlot.Status.BOOKED]
         return [
             {
-                "date": s.date.isoformat(),
+                "start_date": s.date.isoformat(),
+                "end_date": s.date.isoformat(),
                 "weekday": s.date.strftime("%a"),
-                "title": s.note,
+                "title": s.note or "",
             }
-            for s in booked[:UPCOMING_BOOKED_LIMIT]
+            for s in self._upcoming_slots(obj)
+            if s.status == AvailabilitySlot.Status.BOOKED
         ]
+
+    def get_available_ranges(self, obj) -> list[dict]:
+        from apps.bookings.models import AvailabilitySlot
+
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        blocked = sorted({
+            s.date for s in self._upcoming_slots(obj)
+            if s.status in (AvailabilitySlot.Status.BOOKED, AvailabilitySlot.Status.SOFT_HOLD)
+        })
+
+        merged: list[list] = []
+        for d in blocked:
+            if merged and d <= merged[-1][1] + timedelta(days=1):
+                merged[-1][1] = d
+            else:
+                merged.append([d, d])
+
+        free: list[dict] = []
+        cursor = today
+        for s, e in merged:
+            if cursor < s:
+                free.append({"start": cursor.isoformat(), "end": (s - timedelta(days=1)).isoformat()})
+            if e >= cursor:
+                cursor = e + timedelta(days=1)
+        if cursor <= horizon:
+            free.append({"start": cursor.isoformat(), "end": horizon.isoformat()})
+        return free
 
     def _upcoming_slots(self, obj) -> list:
         cached = getattr(obj.user, "upcoming_slots_prefetched", None)
         if cached is not None:
             return cached
-        # Fallback for callers that didn't prefetch (kept ordered by date).
         from apps.bookings.models import AvailabilitySlot
 
         today = timezone.now().date()
@@ -110,7 +114,7 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
             AvailabilitySlot.objects.filter(
                 user=obj.user,
                 date__gte=today,
-                date__lte=today + timedelta(days=UPCOMING_WINDOW_DAYS),
+                date__lte=today + timedelta(days=AVAILABILITY_WINDOW_DAYS),
             ).order_by("date")
         )
 
@@ -192,6 +196,8 @@ class RecentSearchSerializer(serializers.ModelSerializer):
 class SeatGeekPerformerSerializer(serializers.ModelSerializer):
     source = serializers.CharField(default="seatgeek", read_only=True)
     genres = serializers.SerializerMethodField()
+    booked_dates = serializers.SerializerMethodField()
+    available_ranges = serializers.SerializerMethodField()
 
     class Meta:
         model = SeatGeekPerformer
@@ -205,6 +211,8 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
             "genres",
             "provider_id",
             "provider_name",
+            "booked_dates",
+            "available_ranges",
             "created_at",
         )
 
@@ -214,6 +222,48 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
         if cached is not None:
             return [pg.genre for pg in cached]
         return list(obj.performergenres_set.values_list("genre", flat=True))
+
+    def get_booked_dates(self, obj) -> list[dict]:
+        return self._booked_ranges(obj)
+
+    def get_available_ranges(self, obj) -> list[dict]:
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        booked = self._booked_ranges(obj)
+
+        intervals = sorted(
+            (date_cls.fromisoformat(b["start_date"]), date_cls.fromisoformat(b["end_date"]))
+            for b in booked
+        )
+        merged: list[list] = []
+        for s, e in intervals:
+            if merged and s <= merged[-1][1] + timedelta(days=1):
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+
+        free: list[dict] = []
+        cursor = today
+        for s, e in merged:
+            if cursor < s:
+                free.append({"start": cursor.isoformat(), "end": (s - timedelta(days=1)).isoformat()})
+            if e >= cursor:
+                cursor = e + timedelta(days=1)
+        if cursor <= horizon:
+            free.append({"start": cursor.isoformat(), "end": horizon.isoformat()})
+        return free
+
+    def _booked_ranges(self, obj) -> list[dict]:
+        ranges_map = self.context.get("sg_booked_ranges_map") or {}
+        if obj.id in ranges_map:
+            return ranges_map[obj.id]
+        from apps.catalog.services import SeatGeekService
+
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        return SeatGeekService.get_booked_ranges_map(
+            [obj.id], from_date=today, to_date=horizon,
+        ).get(obj.id, [])
 
 
 class SeatGeekVenueSerializer(serializers.ModelSerializer):

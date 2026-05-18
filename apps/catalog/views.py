@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import date, timedelta
 
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -9,6 +10,7 @@ from apps.common.pagination import StandardPagination
 
 from .models import ArtistProfile, Genre, VenueProfile
 from .serializers import (
+    AVAILABILITY_WINDOW_DAYS,
     ArtistProfileSerializer,
     ArtistProfileUpdateSerializer,
     FavoriteCreateSerializer,
@@ -65,6 +67,8 @@ class ArtistListView(APIView):
         longitude = _parse_float(params.get("longitude"))
         radius = _parse_float(params.get("radius_miles"))
         available_on = _parse_date(params.get("available_on"))
+        available_from = _parse_date(params.get("available_from"))
+        available_to = _parse_date(params.get("available_to"))
         favorites_only = _parse_bool(params.get("favorites_only"))
         genre_slugs = [s for s in params.get("genres", "").split(",") if s.strip()]
 
@@ -76,27 +80,38 @@ class ArtistListView(APIView):
             radius_miles=radius,
             genre_slugs=genre_slugs or None,
             available_on=available_on,
+            available_from=available_from,
+            available_to=available_to,
             favorites_only=favorites_only,
         )
 
-        if request.user.is_authenticated and (query or genre_slugs or available_on or radius):
+        if request.user.is_authenticated and (
+            query or genre_slugs or available_on or available_from or available_to or radius
+        ):
             RecentSearchService.record(
                 user=request.user,
                 query=query or "",
                 location=params.get("location", "") or "",
                 radius_miles=int(radius) if radius else None,
                 genres=genre_slugs,
-                target_date=available_on,
+                target_date=available_on or available_from,
             )
 
-        sg_qs = SeatGeekService.search_performers(query=query)
+        # Favorites are only defined for internal artists; SG performers can't be favorited.
+        sg_qs = None if favorites_only else SeatGeekService.search_performers(
+            query=query,
+            available_on=available_on,
+            available_from=available_from,
+            available_to=available_to,
+            genre_slugs=genre_slugs or None,
+        )
 
         paginator = self.pagination_class()
         limit  = paginator.get_limit(request)  or paginator.default_limit
         offset = paginator.get_offset(request)
 
         internal_count = internal_qs.count()
-        sg_count       = sg_qs.count()
+        sg_count       = sg_qs.count() if sg_qs is not None else 0
         total          = internal_count + sg_count
 
         # Slice only the rows needed for this page from each source.
@@ -105,14 +120,25 @@ class ArtistListView(APIView):
         int_page   = list(internal_qs[int_start:int_end])
         remaining  = limit - len(int_page)
         sg_start   = max(0, offset - internal_count)
-        sg_page    = list(sg_qs[sg_start: sg_start + remaining]) if remaining > 0 else []
+        sg_page    = (
+            list(sg_qs[sg_start: sg_start + remaining])
+            if sg_qs is not None and remaining > 0
+            else []
+        )
+
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_booked_map = SeatGeekService.get_booked_ranges_map(
+            [p.id for p in sg_page], from_date=today, to_date=horizon,
+        )
+        sg_context = {"request": request, "sg_booked_ranges_map": sg_booked_map}
 
         int_data = [
             {"source": "internal", **ArtistProfileSerializer(a, context={"request": request}).data}
             for a in int_page
         ]
         sg_data = [
-            {"source": "seatgeek", **SeatGeekPerformerSerializer(p).data}
+            {"source": "seatgeek", **SeatGeekPerformerSerializer(p, context=sg_context).data}
             for p in sg_page
         ]
 
@@ -147,9 +173,17 @@ class ArtistDetailView(APIView):
                 {"success": False, "error": {"code": "not_found", "message": "Artist not found."}},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_booked_map = SeatGeekService.get_booked_ranges_map(
+            [performer.id], from_date=today, to_date=horizon,
+        )
         return Response(
             {"success": True, "source": "seatgeek",
-             "artist": SeatGeekPerformerSerializer(performer).data},
+             "artist": SeatGeekPerformerSerializer(
+                 performer,
+                 context={"request": request, "sg_booked_ranges_map": sg_booked_map},
+             ).data},
             status=status.HTTP_200_OK,
         )
 

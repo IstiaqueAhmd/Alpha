@@ -34,6 +34,11 @@ class Events(models.Model):
     class Meta:
         db_table = "events"
         unique_together = (("provider_name", "provider_id"),)
+        indexes = [
+            models.Index(fields=["start_date"], name="ev_start_date_idx"),
+            models.Index(fields=["end_date"], name="ev_end_date_idx"),
+            models.Index(fields=["start_date", "end_date"], name="ev_start_end_idx"),
+        ]
 
 
 class PerformerEvents(models.Model):

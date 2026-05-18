@@ -10,15 +10,15 @@ from apps.accounts.models import User
 from .models import ArtistProfile, Favorite, Genre, RecentSearch, VenueProfile
 
 EARTH_RADIUS_MILES = 3958.8
-UPCOMING_WINDOW_DAYS = 60
+AVAILABILITY_WINDOW_DAYS = 365
 
 
 def _prefetch_upcoming_slots():
-    """Attach upcoming availability slots to each artist's user under ``upcoming_slots_prefetched``."""
+    """Attach 1-year availability slots to each artist's user under ``upcoming_slots_prefetched``."""
     from apps.bookings.models import AvailabilitySlot
 
     today = timezone.now().date()
-    horizon = today + timedelta(days=UPCOMING_WINDOW_DAYS)
+    horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
     slots_qs = (
         AvailabilitySlot.objects
         .filter(date__gte=today, date__lte=horizon)
@@ -46,6 +46,23 @@ def _haversine_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> floa
     return EARTH_RADIUS_MILES * 2 * math.asin(math.sqrt(a))
 
 
+def _resolve_availability_range(
+    available_on: date | None,
+    available_from: date | None,
+    available_to: date | None,
+) -> tuple[date | None, date | None]:
+    """`available_on` is a single-day shortcut; explicit from/to override either end."""
+    start = available_from or available_on
+    end = available_to or available_on
+    if start and not end:
+        end = start
+    if end and not start:
+        start = end
+    if start and end and start > end:
+        start, end = end, start
+    return start, end
+
+
 class CatalogService:
     @staticmethod
     def search_artists(
@@ -57,6 +74,8 @@ class CatalogService:
         radius_miles: float | None = None,
         genre_slugs: list[str] | None = None,
         available_on: date | None = None,
+        available_from: date | None = None,
+        available_to: date | None = None,
         favorites_only: bool = False,
     ) -> QuerySet[ArtistProfile]:
         qs: QuerySet[ArtistProfile] = (
@@ -77,10 +96,13 @@ class CatalogService:
                 raise PermissionDenied("Sign in to filter by favorites.")
             qs = qs.filter(favorited_by__user=viewer)
 
-        if available_on:
+        block_from, block_to = _resolve_availability_range(available_on, available_from, available_to)
+        if block_from and block_to:
             from apps.bookings.models import AvailabilitySlot
+
             unavailable_user_ids = AvailabilitySlot.objects.filter(
-                date=available_on,
+                date__gte=block_from,
+                date__lte=block_to,
                 status__in=[AvailabilitySlot.Status.BOOKED, AvailabilitySlot.Status.SOFT_HOLD],
             ).values_list("user_id", flat=True)
             qs = qs.exclude(user_id__in=list(unavailable_user_ids))
@@ -188,12 +210,84 @@ class FavoritesService:
 
 class SeatGeekService:
     @staticmethod
-    def search_performers(*, query: str | None = None) -> QuerySet:
-        from apps.seatgeek.models import Performers
+    def search_performers(
+        *,
+        query: str | None = None,
+        available_on: date | None = None,
+        available_from: date | None = None,
+        available_to: date | None = None,
+        genre_slugs: list[str] | None = None,
+    ) -> QuerySet:
+        from apps.seatgeek.models import PerformerEvents, PerformerGenres, Performers
+
         qs = Performers.objects.prefetch_related("performergenres_set").all()
         if query:
             qs = qs.filter(name__icontains=query)
+
+        if genre_slugs:
+            # PerformerGenres.genre is free-text — match case-insensitively against the slug.
+            genre_q = Q()
+            for slug in genre_slugs:
+                genre_q |= Q(genre__iexact=slug) | Q(genre__icontains=slug)
+            genre_performer_ids = (
+                PerformerGenres.objects
+                .filter(genre_q)
+                .values_list("performer_id", flat=True)
+                .distinct()
+            )
+            qs = qs.filter(pk__in=list(genre_performer_ids))
+
+        block_from, block_to = _resolve_availability_range(available_on, available_from, available_to)
+        if block_from and block_to:
+            booked_ids = (
+                PerformerEvents.objects
+                .filter(event__start_date__lte=block_to, event__end_date__gte=block_from)
+                .values_list("performer_id", flat=True)
+                .distinct()
+            )
+            qs = qs.exclude(pk__in=list(booked_ids))
+
         return qs.order_by("name")
+
+    @staticmethod
+    def get_booked_ranges_map(
+        performer_ids: list[str],
+        *,
+        from_date: date,
+        to_date: date,
+    ) -> dict[str, list[dict]]:
+        """performer_id → list of event ranges overlapping [from_date, to_date], clipped to that window."""
+        from apps.seatgeek.models import PerformerEvents
+
+        if not performer_ids:
+            return {}
+
+        rows = (
+            PerformerEvents.objects
+            .select_related("event", "event__venue")
+            .filter(
+                performer_id__in=performer_ids,
+                event__start_date__lte=to_date,
+                event__end_date__gte=from_date,
+            )
+            .order_by("event__start_date")
+        )
+
+        out: dict[str, list[dict]] = {}
+        for pe in rows:
+            ev = pe.event
+            clipped_start = ev.start_date if ev.start_date > from_date else from_date
+            clipped_end = ev.end_date if ev.end_date < to_date else to_date
+            out.setdefault(pe.performer_id, []).append({
+                "event_id": ev.id,
+                "event_name": ev.name,
+                "start_date": clipped_start.isoformat(),
+                "end_date": clipped_end.isoformat(),
+                "weekday": clipped_start.strftime("%a"),
+                "venue": ev.venue.name if ev.venue_id and ev.venue else (ev.location_name or ""),
+                "city": ev.venue.city if ev.venue_id and ev.venue else "",
+            })
+        return out
 
     @staticmethod
     def search_venues(
