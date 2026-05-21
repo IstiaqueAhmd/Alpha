@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.accounts.models import User
+from apps.seatgeek.models import Performers as SeatGeekPerformer
 
 from .models import Activity, AvailabilitySlot, BookingOffer
 
@@ -48,22 +49,40 @@ class AvailabilityService:
 class BookingService:
     @classmethod
     @transaction.atomic
-    def create_offer(cls, *, requester: User, artist_id: int, **fields) -> BookingOffer:
-        artist = User.objects.filter(pk=artist_id, role=User.Role.ARTIST, is_active=True).first()
-        if not artist:
+    def create_offer(cls, *, requester: User, artist_id: str, **fields) -> BookingOffer:
+        artist, sg_performer = cls._resolve_target(artist_id)
+        if not artist and not sg_performer:
             raise NotFound("Artist not found.")
-        if artist.pk == requester.pk:
+        if artist and artist.pk == requester.pk:
             raise ValidationError("You cannot send an offer to yourself.")
 
-        offer = BookingOffer.objects.create(requester=requester, artist=artist, **fields)
-        Activity.objects.create(
-            user=artist,
-            verb=Activity.Verb.OFFER_RECEIVED,
-            summary="Offer received",
-            detail=offer.title,
-            metadata={"offer_id": offer.pk, "from_user_id": requester.pk},
+        offer = BookingOffer.objects.create(
+            requester=requester,
+            artist=artist,
+            seatgeek_performer=sg_performer,
+            **fields,
         )
+        if artist:
+            Activity.objects.create(
+                user=artist,
+                verb=Activity.Verb.OFFER_RECEIVED,
+                summary="Offer received",
+                detail=offer.title,
+                metadata={"offer_id": offer.pk, "from_user_id": requester.pk},
+            )
         return offer
+
+    @staticmethod
+    def _resolve_target(artist_id: str) -> tuple[User | None, SeatGeekPerformer | None]:
+        raw = str(artist_id)
+        if raw.isdigit():
+            artist = User.objects.filter(
+                pk=int(raw), role=User.Role.ARTIST, is_active=True,
+            ).first()
+            if artist:
+                return artist, None
+        sg = SeatGeekPerformer.objects.filter(pk=raw).first()
+        return None, sg
 
     @classmethod
     @transaction.atomic

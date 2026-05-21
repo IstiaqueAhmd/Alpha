@@ -52,6 +52,15 @@ class BookingOffer(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="received_offers",
         limit_choices_to={"role": "artist"},
+        null=True,
+        blank=True,
+    )
+    seatgeek_performer = models.ForeignKey(
+        "seatgeek.Performers",
+        on_delete=models.SET_NULL,
+        related_name="received_offers",
+        null=True,
+        blank=True,
     )
 
     title = models.CharField(max_length=255)
@@ -79,6 +88,16 @@ class BookingOffer(TimeStampedModel):
             models.Index(fields=["artist", "status", "-event_date"]),
             models.Index(fields=["requester", "-created_at"]),
             models.Index(fields=["status", "event_date"]),
+            models.Index(fields=["seatgeek_performer", "status", "-event_date"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(artist__isnull=False, seatgeek_performer__isnull=True)
+                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=False)
+                ),
+                name="booking_offer_artist_xor_seatgeek",
+            ),
         ]
 
     def __str__(self) -> str:

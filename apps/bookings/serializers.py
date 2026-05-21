@@ -18,9 +18,17 @@ class AvailabilitySlotUpsertSerializer(serializers.Serializer):
     note = serializers.CharField(max_length=255, allow_blank=True, required=False)
 
 
+class BookingOfferSeatGeekPerformerSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    name = serializers.CharField()
+    image = serializers.CharField()
+    url = serializers.CharField()
+
+
 class BookingOfferSerializer(serializers.ModelSerializer):
     requester = UserSerializer(read_only=True)
     artist = UserSerializer(read_only=True)
+    seatgeek_performer = BookingOfferSeatGeekPerformerSerializer(read_only=True)
 
     class Meta:
         model = BookingOffer
@@ -28,6 +36,7 @@ class BookingOfferSerializer(serializers.ModelSerializer):
             "id",
             "requester",
             "artist",
+            "seatgeek_performer",
             "title",
             "event_date",
             "event_time",
@@ -44,11 +53,19 @@ class BookingOfferSerializer(serializers.ModelSerializer):
             "decided_at",
             "created_at",
         )
-        read_only_fields = ("id", "requester", "artist", "status", "decided_at", "created_at")
+        read_only_fields = (
+            "id",
+            "requester",
+            "artist",
+            "seatgeek_performer",
+            "status",
+            "decided_at",
+            "created_at",
+        )
 
 
 class BookingOfferCreateSerializer(serializers.Serializer):
-    artist_id = serializers.IntegerField()
+    artist_id = serializers.CharField(max_length=191)
     title = serializers.CharField(max_length=255)
     event_date = serializers.DateField()
     event_time = serializers.TimeField(required=False, allow_null=True)

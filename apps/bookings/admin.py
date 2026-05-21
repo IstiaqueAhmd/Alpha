@@ -16,6 +16,7 @@ class BookingOfferAdmin(admin.ModelAdmin):
     list_display = (
         "title",
         "artist",
+        "seatgeek_performer",
         "requester",
         "event_date",
         "amount_cents",
@@ -23,7 +24,13 @@ class BookingOfferAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("status",)
-    search_fields = ("title", "artist__email", "requester__email", "venue_name")
+    search_fields = (
+        "title",
+        "artist__email",
+        "seatgeek_performer__name",
+        "requester__email",
+        "venue_name",
+    )
     autocomplete_fields = ("artist", "requester")
     readonly_fields = ("created_at", "updated_at", "decided_at")
 
