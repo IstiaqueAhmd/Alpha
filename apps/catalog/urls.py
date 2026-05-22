@@ -24,6 +24,6 @@ urlpatterns = [
     path("venues/me/", MyVenueProfileView.as_view(), name="venue-me"),
     path("venues/<str:venue_id>/", VenueDetailView.as_view(), name="venue-detail"),
     path("favorites/", FavoritesView.as_view(), name="favorites"),
-    path("favorites/<int:artist_id>/", FavoriteDeleteView.as_view(), name="favorite-delete"),
+    path("favorites/<str:artist_id>/", FavoriteDeleteView.as_view(), name="favorite-delete"),
     path("recent-searches/", RecentSearchesView.as_view(), name="recent-searches"),
 ]

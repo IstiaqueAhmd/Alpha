@@ -306,12 +306,34 @@ class FavoritesView(APIView):
     pagination_class = StandardPagination
 
     def get(self, request):
-        favorites = FavoritesService.list_for(request.user)
-        artists = [fav.artist for fav in favorites]
+        favorites = list(FavoritesService.list_for(request.user))
         paginator = self.pagination_class()
-        page = paginator.paginate_queryset(artists, request, view=self)
-        serializer = ArtistProfileSerializer(page, many=True, context={"request": request})
-        return paginator.get_paginated_response(serializer.data)
+        page = paginator.paginate_queryset(favorites, request, view=self)
+
+        sg_perfs = [f.seatgeek_performer for f in page if f.seatgeek_performer_id]
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_booked_map = (
+            SeatGeekService.get_booked_ranges_map(
+                [p.id for p in sg_perfs], from_date=today, to_date=horizon,
+            )
+            if sg_perfs else {}
+        )
+        sg_context = {"request": request, "sg_booked_ranges_map": sg_booked_map}
+
+        data = []
+        for fav in page:
+            if fav.artist_id:
+                data.append({
+                    "source": "internal",
+                    **ArtistProfileSerializer(fav.artist, context={"request": request}).data,
+                })
+            elif fav.seatgeek_performer_id:
+                data.append({
+                    "source": "seatgeek",
+                    **SeatGeekPerformerSerializer(fav.seatgeek_performer, context=sg_context).data,
+                })
+        return paginator.get_paginated_response(data)
 
     def post(self, request):
         serializer = FavoriteCreateSerializer(data=request.data)
@@ -323,7 +345,7 @@ class FavoritesView(APIView):
 class FavoriteDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def delete(self, request, artist_id: int):
+    def delete(self, request, artist_id: str):
         FavoritesService.remove(user=request.user, artist_id=artist_id)
         return Response({"success": True}, status=status.HTTP_204_NO_CONTENT)
 

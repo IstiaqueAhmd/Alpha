@@ -186,26 +186,49 @@ class CatalogService:
 
 class FavoritesService:
     @staticmethod
-    def add(*, user: User, artist_id: int) -> Favorite:
-        artist = ArtistProfile.objects.filter(pk=artist_id).first()
-        if not artist:
+    def add(*, user: User, artist_id: str) -> Favorite:
+        artist, sg_performer = FavoritesService._resolve_target(artist_id)
+        if not artist and not sg_performer:
             raise NotFound("Artist not found.")
-        favorite, _ = Favorite.objects.get_or_create(user=user, artist=artist)
+        favorite, _ = Favorite.objects.get_or_create(
+            user=user, artist=artist, seatgeek_performer=sg_performer,
+        )
         return favorite
 
     @staticmethod
-    def remove(*, user: User, artist_id: int) -> None:
-        Favorite.objects.filter(user=user, artist_id=artist_id).delete()
+    def remove(*, user: User, artist_id: str) -> None:
+        raw = str(artist_id)
+        if raw.isdigit():
+            removed, _ = Favorite.objects.filter(
+                user=user, artist_id=int(raw), seatgeek_performer__isnull=True,
+            ).delete()
+            if removed:
+                return
+        Favorite.objects.filter(
+            user=user, seatgeek_performer_id=raw, artist__isnull=True,
+        ).delete()
 
     @staticmethod
     def list_for(user: User) -> QuerySet[Favorite]:
         return (
             Favorite.objects
-            .select_related("artist__user")
-            .prefetch_related("artist__genres")
+            .select_related("artist__user", "seatgeek_performer")
+            .prefetch_related("artist__genres", "seatgeek_performer__performergenres_set")
             .filter(user=user)
             .order_by("-created_at")
         )
+
+    @staticmethod
+    def _resolve_target(artist_id: str):
+        from apps.seatgeek.models import Performers as SeatGeekPerformer
+
+        raw = str(artist_id)
+        if raw.isdigit():
+            artist = ArtistProfile.objects.filter(pk=int(raw)).first()
+            if artist:
+                return artist, None
+        sg = SeatGeekPerformer.objects.filter(pk=raw).first()
+        return None, sg
 
 
 class SeatGeekService:

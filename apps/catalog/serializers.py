@@ -183,7 +183,7 @@ class VenueProfileUpdateSerializer(serializers.ModelSerializer):
 
 
 class FavoriteCreateSerializer(serializers.Serializer):
-    artist_id = serializers.IntegerField()
+    artist_id = serializers.CharField(max_length=191)
 
 
 class RecentSearchSerializer(serializers.ModelSerializer):
@@ -196,6 +196,7 @@ class RecentSearchSerializer(serializers.ModelSerializer):
 class SeatGeekPerformerSerializer(serializers.ModelSerializer):
     source = serializers.CharField(default="seatgeek", read_only=True)
     genres = serializers.SerializerMethodField()
+    is_favorited = serializers.SerializerMethodField()
     booked_dates = serializers.SerializerMethodField()
     available_ranges = serializers.SerializerMethodField()
 
@@ -209,12 +210,19 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
             "url",
             "score",
             "genres",
+            "is_favorited",
             "provider_id",
             "provider_name",
             "booked_dates",
             "available_ranges",
             "created_at",
         )
+
+    def get_is_favorited(self, obj) -> bool:
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return Favorite.objects.filter(user=request.user, seatgeek_performer=obj).exists()
 
     def get_genres(self, obj) -> list[str]:
         # Use prefetched cache when available (set by SeatGeekService.search_performers).

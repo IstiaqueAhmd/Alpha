@@ -89,12 +89,31 @@ class Favorite(TimeStampedModel):
         ArtistProfile,
         on_delete=models.CASCADE,
         related_name="favorited_by",
+        null=True,
+        blank=True,
+    )
+    seatgeek_performer = models.ForeignKey(
+        "seatgeek.Performers",
+        on_delete=models.CASCADE,
+        related_name="favorited_by",
+        null=True,
+        blank=True,
     )
 
     class Meta:
         db_table = "favorites"
         constraints = [
             models.UniqueConstraint(fields=["user", "artist"], name="unique_user_artist_favorite"),
+            models.UniqueConstraint(
+                fields=["user", "seatgeek_performer"], name="unique_user_sg_performer_favorite"
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(artist__isnull=False, seatgeek_performer__isnull=True)
+                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=False)
+                ),
+                name="favorite_artist_xor_seatgeek",
+            ),
         ]
         indexes = [models.Index(fields=["user", "-created_at"])]
 
