@@ -240,6 +240,9 @@ class SeatGeekService:
         available_from: date | None = None,
         available_to: date | None = None,
         genre_slugs: list[str] | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_miles: float | None = None,
     ) -> QuerySet:
         from apps.seatgeek.models import PerformerEvents, PerformerGenres, Performers
 
@@ -269,6 +272,29 @@ class SeatGeekService:
                 .distinct()
             )
             qs = qs.exclude(pk__in=list(booked_ids))
+
+        # Performers have no own location — derive geographic footprint from their events' venue
+        # coordinates. A performer is "near" the search point if ANY of their events' venues falls
+        # within the bounding box (cheap pre-filter) and inside the great-circle radius (haversine).
+        if latitude is not None and longitude is not None and radius_miles:
+            lat_min, lat_max, lng_min, lng_max = _bounding_box(latitude, longitude, radius_miles)
+            candidates = (
+                PerformerEvents.objects
+                .filter(
+                    event__venue__lat__gte=lat_min, event__venue__lat__lte=lat_max,
+                    event__venue__long__gte=lng_min, event__venue__long__lte=lng_max,
+                )
+                .values_list("performer_id", "event__venue__lat", "event__venue__long")
+            )
+            near_performer_ids: set[str] = set()
+            for performer_id, venue_lat, venue_lng in candidates:
+                if performer_id in near_performer_ids:
+                    continue  # already matched on an earlier venue, skip the haversine
+                if venue_lat is None or venue_lng is None:
+                    continue
+                if _haversine_miles(latitude, longitude, venue_lat, venue_lng) <= radius_miles:
+                    near_performer_ids.add(performer_id)
+            qs = qs.filter(pk__in=near_performer_ids)
 
         return qs.order_by("name")
 

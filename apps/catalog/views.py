@@ -104,6 +104,9 @@ class ArtistListView(APIView):
             available_from=available_from,
             available_to=available_to,
             genre_slugs=genre_slugs or None,
+            latitude=latitude,
+            longitude=longitude,
+            radius_miles=radius,
         )
 
         paginator = self.pagination_class()

@@ -86,7 +86,11 @@ Search-by-date supports either form:
 - `?available_from=...&available_to=...` — range
 - `?available_on=X&available_to=Y` — `available_on` is treated as the start; the helper `_resolve_availability_range` in `apps/catalog/services.py` normalizes any combination (including reversed ranges).
 
-Geo filter (`latitude`/`longitude`/`radius_miles`) currently applies to **internal artists only** — SG performers have no own location. See `_bounding_box` + `_haversine_miles` for the two-stage filter.
+Geo filter (`latitude`/`longitude`/`radius_miles`) applies to **both sources**:
+- Internal artists are filtered on their own `ArtistProfile.latitude`/`longitude`.
+- SG performers have no own location, so they're filtered via their events' venue coordinates — a performer matches if **any** of their events lives at a venue inside the radius. Performers with no events have no derivable footprint and are excluded while geo is active.
+
+Both sources use the same two-stage `_bounding_box` (cheap rectangular pre-filter) + `_haversine_miles` (great-circle fine-filter).
 
 ## Service / serializer / view split
 

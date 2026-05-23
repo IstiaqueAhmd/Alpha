@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone as dt_tz
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import User
 from apps.bookings.models import AvailabilitySlot
@@ -329,16 +330,270 @@ class ArtistSearchTests(TestCase):
         self.assertNotIn("Busy Star", names, names)
 
     def test_favorites_only_skips_seatgeek(self):
-        self.client.force_login(self.alice_user)
+        # The API only accepts JWTAuthentication (no SessionAuthentication), so force_login
+        # would leave request.user unauthenticated. Issue a real token instead.
+        token = RefreshToken.for_user(self.alice_user).access_token
+        auth = {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
         # No favorites yet.
-        resp = self.client.get(reverse("catalog:artists-list") + "?favorites_only=true")
+        resp = self.client.get(reverse("catalog:artists-list") + "?favorites_only=true", **auth)
         body = resp.json()
         self.assertEqual(body["count"], 0)
 
         # Favorite Bob; only Bob should appear (no SG bleed-through).
         Favorite.objects.create(user=self.alice_user, artist=self.bob)
-        resp = self.client.get(reverse("catalog:artists-list") + "?favorites_only=true")
+        resp = self.client.get(reverse("catalog:artists-list") + "?favorites_only=true", **auth)
         body = resp.json()
         self.assertEqual(body["count"], 1)
         self.assertEqual(body["results"][0]["source"], "internal")
         self.assertEqual(body["results"][0]["user"]["email"], "bob@example.com")
+
+
+class ArtistRadiusFilterTests(TestCase):
+    """End-to-end coverage of the `latitude`/`longitude`/`radius_miles` filter for both sources.
+
+    Internal artists are filtered by their own `ArtistProfile.latitude`/`longitude`.
+    SG performers have no own location, so they're filtered via their events' venue coordinates —
+    a performer is "near" if ANY of their events lives at a venue inside the radius.
+    """
+
+    # Reference points
+    NYC_LAT, NYC_LNG = 40.7128, -74.0060
+    BROOKLYN_LAT, BROOKLYN_LNG = 40.6782, -73.9442      # ~6 mi from NYC
+    CHICAGO_LAT, CHICAGO_LNG = 41.8781, -87.6298        # ~789 mi from NYC
+    # ~33 mi from NYC but inside the 25-mi bounding box (rectangular pre-filter)
+    BBOX_CORNER_LAT, BBOX_CORNER_LNG = 41.05, -73.55
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.today = timezone.now().date()
+        cls.rock = Genre.objects.create(name="Rock", slug="rock")
+        cls.jazz = Genre.objects.create(name="Jazz", slug="jazz")
+
+        # ---- Internal artists ----
+        cls.nyc_user = User.objects.create_user(
+            email="nyc@example.com", password="testpass123",
+            name="NYC Artist", role=User.Role.ARTIST,
+        )
+        cls.nyc_artist = ArtistProfile.objects.create(
+            user=cls.nyc_user, is_published=True,
+            latitude=cls.BROOKLYN_LAT, longitude=cls.BROOKLYN_LNG,
+        )
+        cls.nyc_artist.genres.add(cls.rock)
+
+        cls.chicago_user = User.objects.create_user(
+            email="chi@example.com", password="testpass123",
+            name="Chicago Artist", role=User.Role.ARTIST,
+        )
+        cls.chicago_artist = ArtistProfile.objects.create(
+            user=cls.chicago_user, is_published=True,
+            latitude=cls.CHICAGO_LAT, longitude=cls.CHICAGO_LNG,
+        )
+        cls.chicago_artist.genres.add(cls.jazz)
+
+        cls.corner_user = User.objects.create_user(
+            email="corner@example.com", password="testpass123",
+            name="BBox Corner Artist", role=User.Role.ARTIST,
+        )
+        cls.corner_artist = ArtistProfile.objects.create(
+            user=cls.corner_user, is_published=True,
+            latitude=cls.BBOX_CORNER_LAT, longitude=cls.BBOX_CORNER_LNG,
+        )
+
+        cls.null_user = User.objects.create_user(
+            email="null@example.com", password="testpass123",
+            name="No-Location Artist", role=User.Role.ARTIST,
+        )
+        cls.null_artist = ArtistProfile.objects.create(
+            user=cls.null_user, is_published=True,
+            latitude=None, longitude=None,
+        )
+
+        # ---- SG venues at known locations ----
+        cls.brooklyn_venue = Venues.objects.create(
+            id=str(uuid.uuid4()),
+            provider_name="seatgeek", provider_id="v-brooklyn", provider_slug="brk",
+            provider_url="https://example.com/brk",
+            name="Brooklyn Venue", address="", city="Brooklyn", state="NY",
+            postal_code="11201", country="US",
+            lat=cls.BROOKLYN_LAT, long=cls.BROOKLYN_LNG, capacity=1000,
+            created_at=_now(), updated_at=_now(),
+        )
+        cls.chicago_venue = Venues.objects.create(
+            id=str(uuid.uuid4()),
+            provider_name="seatgeek", provider_id="v-chicago", provider_slug="chi",
+            provider_url="https://example.com/chi",
+            name="Chicago Venue", address="", city="Chicago", state="IL",
+            postal_code="60601", country="US",
+            lat=cls.CHICAGO_LAT, long=cls.CHICAGO_LNG, capacity=1000,
+            created_at=_now(), updated_at=_now(),
+        )
+
+        # ---- SG performers ----
+        # Nearby: has an event at Brooklyn venue.
+        cls.sg_nearby = Performers.objects.create(
+            id=str(uuid.uuid4()), name="Nearby SG Star",
+            provider_id="perf-near", provider_name="seatgeek",
+            url="https://example.com/near", image="", score=80,
+            created_at=_now(), updated_at=_now(),
+        )
+        cls._link_event(cls.sg_nearby, cls.brooklyn_venue, days_offset=200)
+
+        # Distant: only Chicago events.
+        cls.sg_distant = Performers.objects.create(
+            id=str(uuid.uuid4()), name="Distant SG Star",
+            provider_id="perf-far", provider_name="seatgeek",
+            url="https://example.com/far", image="", score=70,
+            created_at=_now(), updated_at=_now(),
+        )
+        cls._link_event(cls.sg_distant, cls.chicago_venue, days_offset=200)
+
+        # Touring: plays Chicago AND Brooklyn — should be matched by either anchor.
+        cls.sg_touring = Performers.objects.create(
+            id=str(uuid.uuid4()), name="Touring SG Star",
+            provider_id="perf-tour", provider_name="seatgeek",
+            url="https://example.com/tour", image="", score=90,
+            created_at=_now(), updated_at=_now(),
+        )
+        cls._link_event(cls.sg_touring, cls.chicago_venue, days_offset=150)
+        cls._link_event(cls.sg_touring, cls.brooklyn_venue, days_offset=180)
+
+        # No-events: no derivable footprint.
+        cls.sg_no_events = Performers.objects.create(
+            id=str(uuid.uuid4()), name="Eventless SG Star",
+            provider_id="perf-none", provider_name="seatgeek",
+            url="https://example.com/none", image="", score=50,
+            created_at=_now(), updated_at=_now(),
+        )
+
+    @classmethod
+    def _link_event(cls, performer, venue, *, days_offset):
+        ev = Events.objects.create(
+            id=str(uuid.uuid4()),
+            venue=venue,
+            provider_name="seatgeek",
+            provider_id=f"ev-{performer.provider_id}-{days_offset}",
+            name=f"{performer.name} Show",
+            url="", location_name=venue.name, location_url="",
+            start_date=cls.today + timedelta(days=days_offset),
+            end_date=cls.today + timedelta(days=days_offset),
+            address="",
+            created_at=_now(), updated_at=_now(),
+        )
+        PerformerEvents.objects.create(
+            id=str(uuid.uuid4()),
+            performer=performer, event=ev,
+            created_at=_now(), updated_at=_now(),
+        )
+
+    def _names(self, results):
+        return [r.get("name") or (r.get("user") or {}).get("name") for r in results]
+
+    def _list(self, **params):
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        return self.client.get(reverse("catalog:artists-list") + (f"?{qs}" if qs else ""))
+
+    # ---- Internal-artist coverage ----
+
+    def test_radius_includes_nearby_excludes_distant(self):
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertIn("NYC Artist", names, names)
+        self.assertNotIn("Chicago Artist", names, names)
+
+    def test_radius_excludes_artist_with_null_coordinates(self):
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertNotIn("No-Location Artist", names, names)
+
+    def test_haversine_rejects_artist_inside_bbox_but_outside_circle(self):
+        # Corner artist is inside the rectangular bbox for a 25-mi search around NYC
+        # but ~33 mi away in straight-line distance — must be excluded by haversine.
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertNotIn("BBox Corner Artist", names, names)
+
+    def test_haversine_accepts_artist_inside_circle(self):
+        # Widening to 40 mi pulls the corner artist in (~33 mi away).
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=40)
+        names = self._names(resp.json()["results"])
+        self.assertIn("BBox Corner Artist", names, names)
+
+    def test_large_radius_pulls_in_distant_artist(self):
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=1000)
+        names = self._names(resp.json()["results"])
+        self.assertIn("Chicago Artist", names, names)
+        self.assertIn("NYC Artist", names, names)
+
+    # ---- SG-performer coverage (via event venues) ----
+
+    def test_geo_filter_includes_sg_with_nearby_event_venue(self):
+        # Nearby SG Star plays at the Brooklyn venue (~6 mi from NYC).
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertIn("Nearby SG Star", names, names)
+
+    def test_geo_filter_excludes_sg_with_only_distant_event_venues(self):
+        # Distant SG Star only plays Chicago — must not appear in NYC 25-mi search.
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertNotIn("Distant SG Star", names, names)
+
+    def test_geo_filter_excludes_sg_with_no_events(self):
+        # Eventless SG Star has no derivable location → must not appear when geo is active.
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertNotIn("Eventless SG Star", names, names)
+
+    def test_geo_filter_includes_touring_sg_when_any_venue_matches(self):
+        # Touring SG Star plays both Chicago and Brooklyn — Brooklyn matches NYC, so include.
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertIn("Touring SG Star", names, names)
+
+    def test_geo_filter_includes_touring_sg_when_searching_other_anchor(self):
+        # Searching near Chicago — Touring SG plays there too.
+        resp = self._list(latitude=self.CHICAGO_LAT, longitude=self.CHICAGO_LNG, radius_miles=25)
+        names = self._names(resp.json()["results"])
+        self.assertIn("Touring SG Star", names, names)
+        self.assertIn("Distant SG Star", names, names)
+        self.assertNotIn("Nearby SG Star", names, names)
+
+    # ---- Cross-cutting ----
+
+    def test_no_geo_params_keeps_all_seatgeek_performers(self):
+        # Without geo filter, SG performers always appear regardless of where they tour.
+        resp = self._list()
+        names = self._names(resp.json()["results"])
+        for sg_name in ("Nearby SG Star", "Distant SG Star", "Touring SG Star", "Eventless SG Star"):
+            self.assertIn(sg_name, names, sg_name)
+
+    def test_partial_geo_params_disable_the_filter(self):
+        # Missing radius_miles → filter is skipped; everyone (including no-coord and eventless) comes through.
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG)
+        names = self._names(resp.json()["results"])
+        self.assertIn("NYC Artist", names)
+        self.assertIn("Chicago Artist", names)
+        self.assertIn("No-Location Artist", names)
+        self.assertIn("Eventless SG Star", names)
+        self.assertIn("Distant SG Star", names)
+
+    def test_radius_zero_disables_the_filter(self):
+        # radius_miles=0 is falsy in the service guard; treated as "no filter".
+        resp = self._list(latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=0)
+        names = self._names(resp.json()["results"])
+        self.assertIn("Chicago Artist", names)
+        self.assertIn("No-Location Artist", names)
+        self.assertIn("Distant SG Star", names)
+        self.assertIn("Eventless SG Star", names)
+
+    def test_radius_combines_with_genre_filter(self):
+        # Nearby NYC artist is rock; Chicago artist is jazz. Genre=rock + radius=25mi → only NYC.
+        resp = self._list(
+            latitude=self.NYC_LAT, longitude=self.NYC_LNG, radius_miles=25, genres="rock",
+        )
+        names = self._names(resp.json()["results"])
+        self.assertIn("NYC Artist", names, names)
+        self.assertNotIn("Chicago Artist", names, names)
+        # No SG performer has a "rock" genre in this fixture, so SG should drop out.
+        self.assertNotIn("Nearby SG Star", names, names)
