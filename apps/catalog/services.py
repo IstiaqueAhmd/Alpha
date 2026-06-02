@@ -244,24 +244,31 @@ class SeatGeekService:
         longitude: float | None = None,
         radius_miles: float | None = None,
     ) -> QuerySet:
-        from apps.seatgeek.models import PerformerEvents, PerformerGenres, Performers
+        from apps.seatgeek.models import PerformerEvents, PerformerGenres, Performers, PerformerSeatgeekGenres
 
-        qs = Performers.objects.prefetch_related("performergenres_set").all()
+        qs = Performers.objects.prefetch_related("performergenres_set", "performerseatgeekgenres_set__seatgeek_genre").all()
         if query:
             qs = qs.filter(name__icontains=query)
 
         if genre_slugs:
-            # PerformerGenres.genre is free-text — match case-insensitively against the slug.
             genre_q = Q()
+            sg_genre_q = Q()
             for slug in genre_slugs:
                 genre_q |= Q(genre__iexact=slug) | Q(genre__icontains=slug)
-            genre_performer_ids = (
+                sg_genre_q |= Q(seatgeek_genre__slug__iexact=slug) | Q(seatgeek_genre__slug__icontains=slug)
+            
+            genre_performer_ids = set(
                 PerformerGenres.objects
                 .filter(genre_q)
                 .values_list("performer_id", flat=True)
-                .distinct()
             )
-            qs = qs.filter(pk__in=list(genre_performer_ids))
+            sg_genre_performer_ids = set(
+                PerformerSeatgeekGenres.objects
+                .filter(sg_genre_q)
+                .values_list("performer_id", flat=True)
+            )
+            
+            qs = qs.filter(pk__in=list(genre_performer_ids | sg_genre_performer_ids))
 
         block_from, block_to = _resolve_availability_range(available_on, available_from, available_to)
         if block_from and block_to:

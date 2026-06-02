@@ -45,8 +45,8 @@ DEMO_USERS = [
     {"key": "kanye",   "email": "kanye.west" + DEMO_DOMAIN,    "name": "Kanye Omari West",     "role": "artist",       "phone": "+1 555-0105"},
 
     # Talent buyers
-    {"key": "buyer1", "email": "sarah.mitchell" + DEMO_DOMAIN, "name": "Sarah Mitchell", "role": "talent_buyer", "phone": "+1 555-0201"},
-    {"key": "buyer2", "email": "marcus.chen" + DEMO_DOMAIN,    "name": "Marcus Chen",    "role": "talent_buyer", "phone": "+1 555-0202"},
+    {"key": "buyer1", "email": "sarah.mitchell" + DEMO_DOMAIN, "name": "Sarah Mitchell", "role": "talent-buyer", "phone": "+1 555-0201"},
+    {"key": "buyer2", "email": "marcus.chen" + DEMO_DOMAIN,    "name": "Marcus Chen",    "role": "talent-buyer", "phone": "+1 555-0202"},
 
     # Agents
     {"key": "agent1", "email": "emma.rodriguez" + DEMO_DOMAIN, "name": "Emma Rodriguez", "role": "agent", "phone": "+1 555-0301"},

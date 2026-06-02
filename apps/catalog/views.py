@@ -70,7 +70,11 @@ class ArtistListView(APIView):
         available_from = _parse_date(params.get("available_from"))
         available_to = _parse_date(params.get("available_to"))
         favorites_only = _parse_bool(params.get("favorites_only"))
-        genre_slugs = [s for s in params.get("genres", "").split(",") if s.strip()]
+        genre_slugs = []
+        for val in params.getlist("genres"):
+            for s in val.split(","):
+                if s.strip():
+                    genre_slugs.append(s.strip().lower())
 
         internal_qs = CatalogService.search_artists(
             viewer=request.user if request.user.is_authenticated else None,

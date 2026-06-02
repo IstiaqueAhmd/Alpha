@@ -225,11 +225,27 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
         return Favorite.objects.filter(user=request.user, seatgeek_performer=obj).exists()
 
     def get_genres(self, obj) -> list[str]:
-        # Use prefetched cache when available (set by SeatGeekService.search_performers).
-        cached = getattr(obj, "_prefetched_objects_cache", {}).get("performergenres_set")
-        if cached is not None:
-            return [pg.genre for pg in cached]
-        return list(obj.performergenres_set.values_list("genre", flat=True))
+        genres = set()
+        
+        # Free-text genres
+        cached_free = getattr(obj, "_prefetched_objects_cache", {}).get("performergenres_set")
+        if cached_free is not None:
+            for pg in cached_free:
+                genres.add(pg.genre)
+        else:
+            for genre in obj.performergenres_set.values_list("genre", flat=True):
+                genres.add(genre)
+                
+        # Structured seatgeek genres
+        cached_sg = getattr(obj, "_prefetched_objects_cache", {}).get("performerseatgeekgenres_set")
+        if cached_sg is not None:
+            for psg in cached_sg:
+                genres.add(psg.seatgeek_genre.name)
+        else:
+            for name in obj.performerseatgeekgenres_set.values_list("seatgeek_genre__name", flat=True):
+                genres.add(name)
+                
+        return sorted(list(genres))
 
     def get_booked_dates(self, obj) -> list[dict]:
         return self._booked_ranges(obj)

@@ -11,7 +11,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     class Role(models.TextChoices):
         ARTIST = "artist", "Artist"
         AGENT = "agent", "Agent"
-        TALENT_BUYER = "talent_buyer", "Talent Buyer"
+        TALENT_BUYER = "talent-buyer", "Talent Buyer"
         VENUE = "venue", "Venue"
         ORGANIZER = "organizer", "Organizer"
 
