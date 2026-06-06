@@ -237,11 +237,9 @@ class PasswordResetService:
 
 
 class GoogleAuthService:
-    """Verify a Google ID token and resolve it to an existing user.
+    """Verify a Google ID token and resolve it to a user.
 
-    New accounts cannot be created via Google: per spec, an unrecognized Google
-    identity is rejected with ACCOUNT_NOT_FOUND so the frontend can route to
-    the Sign-Up page (where the user picks a role).
+    New accounts are created automatically with the TALENT_BUYER role.
     """
 
     @classmethod
@@ -281,7 +279,17 @@ class GoogleAuthService:
         if user is None:
             user = User.objects.filter(email__iexact=email).first()
             if user is None:
-                raise GoogleAccountNotFound()
+                # CHANGED: create new user with default role talent-buyer
+                user = User.objects.create(
+                    email=email,
+                    google_sub=google_sub,
+                    role=User.Role.TALENT_BUYER,
+                    email_verified_at=timezone.now(),
+                    is_active=True,
+                    name=payload.get("name", "").strip() or email.split("@")[0],
+                )
+                return user
+            # Existing email-matched user — link google_sub
             user.google_sub = google_sub
             update_fields = ["google_sub", "updated_at"]
             if user.email_verified_at is None:
