@@ -42,23 +42,38 @@ class BookingOffer(TimeStampedModel):
         CANCELLED = "cancelled", "Cancelled"
         COMPLETED = "completed", "Completed"
 
+    # Talent-buyer who initiated the request.
     requester = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="sent_offers",
     )
-    artist = models.ForeignKey(
+    # Talent-buyer who receives the request and accepts/rejects it.
+    # Nullable at the DB level for legacy rows; required for all new offers
+    # (enforced in BookingOfferCreateSerializer / BookingService.create_offer).
+    recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="received_offers",
+        limit_choices_to={"role": "talent-buyer"},
+        null=True,
+        blank=True,
+    )
+    # Subject of the booking (internal artist). Exactly one of
+    # artist / seatgeek_performer is set (see check constraint below).
+    artist = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="subject_offers",
         limit_choices_to={"role": "artist"},
         null=True,
         blank=True,
     )
+    # Subject of the booking (external SeatGeek performer).
     seatgeek_performer = models.ForeignKey(
         "seatgeek.Performers",
         on_delete=models.SET_NULL,
-        related_name="received_offers",
+        related_name="subject_offers",
         null=True,
         blank=True,
     )
@@ -85,6 +100,7 @@ class BookingOffer(TimeStampedModel):
         db_table = "booking_offers"
         ordering = ("-event_date",)
         indexes = [
+            models.Index(fields=["recipient", "status", "-event_date"]),
             models.Index(fields=["artist", "status", "-event_date"]),
             models.Index(fields=["requester", "-created_at"]),
             models.Index(fields=["status", "event_date"]),

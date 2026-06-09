@@ -27,6 +27,7 @@ class BookingOfferSeatGeekPerformerSerializer(serializers.Serializer):
 
 class BookingOfferSerializer(serializers.ModelSerializer):
     requester = UserSerializer(read_only=True)
+    recipient = UserSerializer(read_only=True)
     artist = UserSerializer(read_only=True)
     seatgeek_performer = BookingOfferSeatGeekPerformerSerializer(read_only=True)
 
@@ -35,6 +36,7 @@ class BookingOfferSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "requester",
+            "recipient",
             "artist",
             "seatgeek_performer",
             "title",
@@ -56,6 +58,7 @@ class BookingOfferSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "requester",
+            "recipient",
             "artist",
             "seatgeek_performer",
             "status",
@@ -66,6 +69,7 @@ class BookingOfferSerializer(serializers.ModelSerializer):
 
 class BookingOfferCreateSerializer(serializers.Serializer):
     artist_id = serializers.CharField(max_length=191)
+    recipient_id = serializers.IntegerField(min_value=1)
     title = serializers.CharField(max_length=255)
     event_date = serializers.DateField()
     event_time = serializers.TimeField(required=False, allow_null=True)

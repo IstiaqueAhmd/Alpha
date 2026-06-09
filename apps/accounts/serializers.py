@@ -58,7 +58,11 @@ class RegisterSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, trim_whitespace=False)
-    role = serializers.ChoiceField(choices=User.Role.choices)
+    role = serializers.ChoiceField(
+        choices=User.Role.choices,
+        required=False,
+        default=User.Role.TALENT_BUYER,
+    )
 
     def validate_name(self, value: str) -> str:
         value = value.strip()

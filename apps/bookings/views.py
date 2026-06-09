@@ -1,6 +1,7 @@
 from datetime import date
 
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -93,9 +94,16 @@ class PublicArtistAvailabilityView(APIView):
         )
 
 
+class InvalidStatusFilter(ValidationError):
+    default_code = "invalid_status_filter"
+    default_detail = "Invalid status. Choose one of: pending, confirmed, past."
+
+
 class BookingOfferListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardPagination
+    # Bookings-screen tabs. None/omitted -> all received offers.
+    ALLOWED_STATUS = {"pending", "confirmed", "past"}
 
     def get(self, request):
         scope = request.query_params.get("scope", "received")
@@ -103,7 +111,9 @@ class BookingOfferListCreateView(APIView):
             qs = BookingService.list_for_requester(request.user)
         else:
             status_filter = request.query_params.get("status")
-            qs = BookingService.list_for_artist(request.user, status_filter=status_filter)
+            if status_filter and status_filter not in self.ALLOWED_STATUS:
+                raise InvalidStatusFilter()
+            qs = BookingService.list_received(request.user, status_filter=status_filter)
         qs = qs.order_by("-created_at")
 
         paginator = self.pagination_class()
@@ -115,7 +125,10 @@ class BookingOfferListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         artist_id = data.pop("artist_id")
-        offer = BookingService.create_offer(requester=request.user, artist_id=artist_id, **data)
+        recipient_id = data.pop("recipient_id")
+        offer = BookingService.create_offer(
+            requester=request.user, artist_id=artist_id, recipient_id=recipient_id, **data
+        )
         return Response(
             {"success": True, "offer": BookingOfferSerializer(offer).data, "message": "Booking request sent."},
             status=status.HTTP_201_CREATED,
@@ -126,7 +139,7 @@ class BookingOfferAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, offer_id: int):
-        offer = BookingService.accept(artist=request.user, offer_id=offer_id)
+        offer = BookingService.accept(recipient=request.user, offer_id=offer_id)
         return Response(
             {"success": True, "offer": BookingOfferSerializer(offer).data},
             status=status.HTTP_200_OK,
@@ -137,7 +150,7 @@ class BookingOfferRejectView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, offer_id: int):
-        offer = BookingService.reject(artist=request.user, offer_id=offer_id)
+        offer = BookingService.reject(recipient=request.user, offer_id=offer_id)
         return Response(
             {"success": True, "offer": BookingOfferSerializer(offer).data},
             status=status.HTTP_200_OK,
@@ -148,16 +161,15 @@ class DashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        kpis = DashboardService.kpis_for_artist(request.user)
+        kpis = DashboardService.kpis_for_user(request.user)
         return Response(
             {
                 "success": True,
-                "active_offers": kpis["active_offers"],
-                "confirmed_bookings": kpis["confirmed_bookings"],
-                "total_earnings_cents": kpis["total_earnings_cents"],
-                "growth_percent": kpis["growth_percent"],
+                "stats": kpis["stats"],
                 "incoming_offers": BookingOfferSerializer(kpis["incoming_offers"], many=True).data,
                 "upcoming_bookings": BookingOfferSerializer(kpis["upcoming_bookings"], many=True).data,
+                "sent": kpis["sent"],
+                "sent_offers": BookingOfferSerializer(kpis["sent_offers"], many=True).data,
                 "recent_activities": ActivitySerializer(kpis["recent_activities"], many=True).data,
             },
             status=status.HTTP_200_OK,
