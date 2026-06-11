@@ -9,6 +9,7 @@ from .views import (
     BookingOfferRejectView,
     DashboardView,
     PublicArtistAvailabilityView,
+    SendToUsersView,
 )
 
 app_name = "bookings"
@@ -22,4 +23,5 @@ urlpatterns = [
     path("offers/<int:offer_id>/reject/", BookingOfferRejectView.as_view(), name="offer-reject"),
     path("dashboard/", DashboardView.as_view(), name="dashboard"),
     path("activity/", ActivityFeedView.as_view(), name="activity"),
+    path("send-to/", SendToUsersView.as_view(), name="send-to"),
 ]
