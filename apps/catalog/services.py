@@ -262,26 +262,37 @@ class SeatGeekService:
             qs = qs.filter(pk__in=list(genre_performer_ids | sg_genre_performer_ids))
 
         block_from, block_to = _resolve_availability_range(available_on, available_from, available_to)
+
+        # When a date range is given, keep only performers who actually have
+        # events within that window — performers with no matching events are
+        # excluded from results.
         if block_from and block_to:
-            booked_ids = (
+            performers_with_events = (
                 PerformerEvents.objects
                 .filter(event__start_date__lte=block_to, event__end_date__gte=block_from)
                 .values_list("performer_id", flat=True)
                 .distinct()
             )
-            qs = qs.exclude(pk__in=list(booked_ids))
+            qs = qs.filter(pk__in=list(performers_with_events))
 
         # Performers have no own location — derive geographic footprint from their events' venue
         # coordinates. A performer is "near" the search point if ANY of their events' venues falls
         # within the bounding box (cheap pre-filter) and inside the great-circle radius (haversine).
+        # When a date range is also active, only events within that window are considered.
         if latitude is not None and longitude is not None and radius_miles:
             lat_min, lat_max, lng_min, lng_max = _bounding_box(latitude, longitude, radius_miles)
+            event_filters = Q(
+                event__venue__lat__gte=lat_min, event__venue__lat__lte=lat_max,
+                event__venue__long__gte=lng_min, event__venue__long__lte=lng_max,
+            )
+            if block_from and block_to:
+                event_filters &= Q(
+                    event__start_date__lte=block_to,
+                    event__end_date__gte=block_from,
+                )
             candidates = (
                 PerformerEvents.objects
-                .filter(
-                    event__venue__lat__gte=lat_min, event__venue__lat__lte=lat_max,
-                    event__venue__long__gte=lng_min, event__venue__long__lte=lng_max,
-                )
+                .filter(event_filters)
                 .values_list("performer_id", "event__venue__lat", "event__venue__long")
             )
             near_performer_ids: set[str] = set()
