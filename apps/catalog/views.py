@@ -60,12 +60,19 @@ class ArtistListView(APIView):
     permission_classes = [AllowAny]
     pagination_class = StandardPagination
 
+    # Fall back to 50-mile radius when the caller provides coordinates but
+    # omits an explicit radius.
+    DEFAULT_RADIUS_MILES = 50.0
+
     def get(self, request):
         params = request.query_params
         query = params.get("q") or None
         latitude = _parse_float(params.get("latitude"))
         longitude = _parse_float(params.get("longitude"))
         radius = _parse_float(params.get("radius_miles"))
+        # Apply default radius when coordinates are provided without one.
+        if latitude is not None and longitude is not None and radius is None:
+            radius = self.DEFAULT_RADIUS_MILES
         available_on = _parse_date(params.get("available_on"))
         available_from = _parse_date(params.get("available_from"))
         available_to = _parse_date(params.get("available_to"))

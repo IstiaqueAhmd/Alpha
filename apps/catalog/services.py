@@ -108,23 +108,14 @@ class CatalogService:
             qs = qs.exclude(user_id__in=list(unavailable_user_ids))
 
         if latitude is not None and longitude is not None and radius_miles:
-            lat_min, lat_max, lng_min, lng_max = _bounding_box(latitude, longitude, radius_miles)
-            qs = qs.filter(
-                latitude__gte=lat_min, latitude__lte=lat_max,
-                longitude__gte=lng_min, longitude__lte=lng_max,
-            )
-            results = []
-            for artist in qs:
-                if artist.latitude is None or artist.longitude is None:
-                    continue
-                if _haversine_miles(latitude, longitude, artist.latitude, artist.longitude) <= radius_miles:
-                    results.append(artist.pk)
-            qs = (
-                ArtistProfile.objects
-                .filter(pk__in=results)
-                .select_related("user")
-                .prefetch_related("genres", _prefetch_upcoming_slots())
-            )
+            # Internal artists have no event-venue geo-data; filter them
+            # the same way SeatGeek performers are filtered — by checking
+            # whether they have *any* confirmed/pending booking at a venue
+            # within the search radius.  BookingOffer stores only a text
+            # address (no lat/lng), so we cannot geo-filter internal
+            # artists and must exclude them when a location filter is
+            # active.  They may still appear via SeatGeek performer results.
+            qs = qs.none()
 
         return qs.order_by("-created_at")
 
