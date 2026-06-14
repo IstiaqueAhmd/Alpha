@@ -25,6 +25,7 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
     is_favorited = serializers.SerializerMethodField()
     booked_dates = serializers.SerializerMethodField()
     available_ranges = serializers.SerializerMethodField()
+    important_dates = serializers.SerializerMethodField()
 
     class Meta:
         model = ArtistProfile
@@ -44,6 +45,7 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
             "is_favorited",
             "booked_dates",
             "available_ranges",
+            "important_dates",
             "created_at",
         )
         read_only_fields = (
@@ -52,6 +54,7 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
             "is_favorited",
             "booked_dates",
             "available_ranges",
+            "important_dates",
             "created_at",
         )
 
@@ -102,6 +105,10 @@ class ArtistProfileSerializer(serializers.ModelSerializer):
         if cursor <= horizon:
             free.append({"start": cursor.isoformat(), "end": horizon.isoformat()})
         return free
+
+    def get_important_dates(self, obj) -> list[dict]:
+        """Internal artists have no event/venue geo-data; always empty."""
+        return []
 
     def _upcoming_slots(self, obj) -> list:
         cached = getattr(obj.user, "upcoming_slots_prefetched", None)
@@ -260,6 +267,7 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
     is_favorited = serializers.SerializerMethodField()
     booked_dates = serializers.SerializerMethodField()
     available_ranges = serializers.SerializerMethodField()
+    important_dates = serializers.SerializerMethodField()
 
     class Meta:
         model = SeatGeekPerformer
@@ -276,6 +284,7 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
             "provider_name",
             "booked_dates",
             "available_ranges",
+            "important_dates",
             "created_at",
         )
 
@@ -310,6 +319,10 @@ class SeatGeekPerformerSerializer(serializers.ModelSerializer):
 
     def get_booked_dates(self, obj) -> list[dict]:
         return self._booked_ranges(obj)
+
+    def get_important_dates(self, obj) -> list[dict]:
+        important_map = self.context.get("sg_important_dates_map") or {}
+        return important_map.get(obj.id, [])
 
     def get_available_ranges(self, obj) -> list[dict]:
         today = timezone.now().date()

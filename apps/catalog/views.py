@@ -142,10 +142,28 @@ class ArtistListView(APIView):
 
         today = timezone.now().date()
         horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_performer_ids = [p.id for p in sg_page]
         sg_booked_map = SeatGeekService.get_booked_ranges_map(
-            [p.id for p in sg_page], from_date=today, to_date=horizon,
+            sg_performer_ids, from_date=today, to_date=horizon,
         )
-        sg_context = {"request": request, "sg_booked_ranges_map": sg_booked_map}
+
+        # Compute important dates (+-2 day buffer) only when geo params are present.
+        sg_important_map: dict = {}
+        if latitude is not None and longitude is not None and radius and sg_performer_ids:
+            sg_important_map = SeatGeekService.get_important_dates_map(
+                sg_performer_ids,
+                from_date=today,
+                to_date=horizon,
+                latitude=latitude,
+                longitude=longitude,
+                radius_miles=radius,
+            )
+
+        sg_context = {
+            "request": request,
+            "sg_booked_ranges_map": sg_booked_map,
+            "sg_important_dates_map": sg_important_map,
+        }
 
         int_data = [
             {"source": "internal", **ArtistProfileSerializer(a, context={"request": request}).data}

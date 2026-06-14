@@ -390,6 +390,105 @@ class SeatGeekService:
         return out
 
     @staticmethod
+    def get_important_dates_map(
+        performer_ids: list[str],
+        *,
+        from_date: date,
+        to_date: date,
+        latitude: float,
+        longitude: float,
+        radius_miles: float,
+        buffer_days: int = 2,
+    ) -> dict[str, list[dict]]:
+        """Return dates +-buffer_days around events at venues within the search radius.
+
+        Only the buffer days are returned (the actual event dates are already
+        covered by ``booked_dates``).  Results are clipped to [from_date, to_date]
+        and deduplicated per performer.
+        """
+        from apps.seatgeek.models import PerformerEvents
+
+        if not performer_ids:
+            return {}
+
+        # Bounding-box pre-filter on venue coordinates.
+        lat_min, lat_max, lng_min, lng_max = _bounding_box(latitude, longitude, radius_miles)
+
+        # Expand the DB date window by the buffer so we catch events whose
+        # buffer spills into [from_date, to_date].
+        expanded_from = from_date - timedelta(days=buffer_days)
+        expanded_to = to_date + timedelta(days=buffer_days)
+
+        rows = (
+            PerformerEvents.objects
+            .select_related("event", "event__venue")
+            .filter(
+                performer_id__in=performer_ids,
+                event__start_date__lte=expanded_to,
+                event__end_date__gte=expanded_from,
+                event__venue__lat__gte=lat_min,
+                event__venue__lat__lte=lat_max,
+                event__venue__long__gte=lng_min,
+                event__venue__long__lte=lng_max,
+            )
+            .order_by("event__start_date")
+        )
+
+        # Fine-filter with haversine + compute buffer dates.
+        out: dict[str, list[dict]] = {}
+        for pe in rows:
+            ev = pe.event
+            venue = ev.venue
+            if not venue or venue.lat is None or venue.long is None:
+                continue
+            if _haversine_miles(latitude, longitude, venue.lat, venue.long) > radius_miles:
+                continue
+
+            # Build set of actual event dates so we can exclude them.
+            event_dates: set[date] = set()
+            d = ev.start_date
+            while d <= ev.end_date:
+                event_dates.add(d)
+                d += timedelta(days=1)
+
+            # Buffer dates = [start-buffer .. start-1] + [end+1 .. end+buffer]
+            venue_name = venue.name if venue else (ev.location_name or "")
+            venue_city = venue.city if venue else ""
+            performer_seen = out.setdefault(pe.performer_id, [])
+            seen_dates = {entry["date"] for entry in performer_seen}
+
+            for offset in range(1, buffer_days + 1):
+                before = ev.start_date - timedelta(days=offset)
+                after = ev.end_date + timedelta(days=offset)
+
+                for buf_date, reason in [
+                    (before, f"{offset} day{'s' if offset > 1 else ''} before event"),
+                    (after, f"{offset} day{'s' if offset > 1 else ''} after event"),
+                ]:
+                    if buf_date < from_date or buf_date > to_date:
+                        continue
+                    if buf_date in event_dates:
+                        continue
+                    iso = buf_date.isoformat()
+                    if iso in seen_dates:
+                        continue
+                    seen_dates.add(iso)
+                    performer_seen.append({
+                        "date": iso,
+                        "weekday": buf_date.strftime("%a"),
+                        "reason": reason,
+                        "event_name": ev.name,
+                        "event_id": ev.id,
+                        "venue": venue_name,
+                        "city": venue_city,
+                    })
+
+        # Sort each performer's list by date.
+        for pid in out:
+            out[pid].sort(key=lambda x: x["date"])
+        return out
+
+    @staticmethod
     def search_venues(
         *,
         query: str | None = None,
