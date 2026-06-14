@@ -469,12 +469,12 @@ class SeatGeekService:
                         continue
                     if buf_date in event_dates:
                         continue
-                    iso = buf_date.isoformat()
-                    if iso in seen_dates:
+                    formatted = buf_date.strftime("%m-%d-%Y")
+                    if formatted in seen_dates:
                         continue
-                    seen_dates.add(iso)
+                    seen_dates.add(formatted)
                     performer_seen.append({
-                        "date": iso,
+                        "date": formatted,
                         "weekday": buf_date.strftime("%a"),
                         "reason": reason,
                         "event_name": ev.name,
