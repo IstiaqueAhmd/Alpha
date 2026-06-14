@@ -340,6 +340,7 @@ class SeatGeekService:
             out.setdefault(pe.performer_id, []).append({
                 "event_id": ev.id,
                 "event_name": ev.name,
+                "url": ev.url,
                 "start_date": clipped_start.isoformat(),
                 "end_date": clipped_end.isoformat(),
                 "weekday": clipped_start.strftime("%a"),
@@ -379,6 +380,7 @@ class SeatGeekService:
             out.setdefault(ev.venue_id, []).append({
                 "event_id": ev.id,
                 "event_name": ev.name,
+                "url": ev.url,
                 "start_date": clipped_start.isoformat(),
                 "end_date": clipped_end.isoformat(),
                 "weekday": clipped_start.strftime("%a"),
