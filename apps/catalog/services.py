@@ -130,6 +130,7 @@ class CatalogService:
         qs: QuerySet[VenueProfile] = (
             VenueProfile.objects
             .select_related("user")
+            .prefetch_related(_prefetch_upcoming_slots())
             .filter(is_published=True, user__is_active=True)
         )
         if query:
@@ -337,6 +338,45 @@ class SeatGeekService:
             clipped_start = ev.start_date if ev.start_date > from_date else from_date
             clipped_end = ev.end_date if ev.end_date < to_date else to_date
             out.setdefault(pe.performer_id, []).append({
+                "event_id": ev.id,
+                "event_name": ev.name,
+                "start_date": clipped_start.isoformat(),
+                "end_date": clipped_end.isoformat(),
+                "weekday": clipped_start.strftime("%a"),
+                "venue": ev.venue.name if ev.venue_id and ev.venue else (ev.location_name or ""),
+                "city": ev.venue.city if ev.venue_id and ev.venue else "",
+            })
+        return out
+
+    @staticmethod
+    def get_venue_booked_ranges_map(
+        venue_ids: list[str],
+        *,
+        from_date: date,
+        to_date: date,
+    ) -> dict[str, list[dict]]:
+        """venue_id → list of event ranges overlapping [from_date, to_date], clipped to that window."""
+        from apps.seatgeek.models import Events
+
+        if not venue_ids:
+            return {}
+
+        rows = (
+            Events.objects
+            .select_related("venue")
+            .filter(
+                venue_id__in=venue_ids,
+                start_date__lte=to_date,
+                end_date__gte=from_date,
+            )
+            .order_by("start_date")
+        )
+
+        out: dict[str, list[dict]] = {}
+        for ev in rows:
+            clipped_start = ev.start_date if ev.start_date > from_date else from_date
+            clipped_end = ev.end_date if ev.end_date < to_date else to_date
+            out.setdefault(ev.venue_id, []).append({
                 "event_id": ev.id,
                 "event_name": ev.name,
                 "start_date": clipped_start.isoformat(),

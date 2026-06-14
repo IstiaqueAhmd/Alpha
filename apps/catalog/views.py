@@ -262,8 +262,15 @@ class VenueListView(APIView):
         sg_start  = max(0, offset - internal_count)
         sg_page   = list(sg_qs[sg_start: sg_start + remaining]) if remaining > 0 else []
 
-        int_data = [{"source": "internal", **VenueProfileSerializer(v).data}  for v in int_page]
-        sg_data  = [{"source": "seatgeek", **SeatGeekVenueSerializer(v).data} for v in sg_page]
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_booked_map = SeatGeekService.get_venue_booked_ranges_map(
+            [v.id for v in sg_page], from_date=today, to_date=horizon,
+        )
+        sg_context = {"request": request, "sg_venue_booked_ranges_map": sg_booked_map}
+
+        int_data = [{"source": "internal", **VenueProfileSerializer(v, context={"request": request}).data}  for v in int_page]
+        sg_data  = [{"source": "seatgeek", **SeatGeekVenueSerializer(v, context=sg_context).data} for v in sg_page]
 
         paginator.count   = total
         paginator.limit   = limit
@@ -279,13 +286,19 @@ class VenueDetailView(APIView):
         # Integer ID → internal VenueProfile
         try:
             pk = int(venue_id)
-            venue = VenueProfile.objects.select_related("user").filter(pk=pk, is_published=True).first()
+            from apps.catalog.services import _prefetch_upcoming_slots
+            venue = (
+                VenueProfile.objects.select_related("user")
+                .prefetch_related(_prefetch_upcoming_slots())
+                .filter(pk=pk, is_published=True)
+                .first()
+            )
             if not venue:
                 return Response(
                     {"success": False, "error": {"code": "not_found", "message": "Venue not found."}},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            return Response({"success": True, "source": "internal", "venue": VenueProfileSerializer(venue).data})
+            return Response({"success": True, "source": "internal", "venue": VenueProfileSerializer(venue, context={"request": request}).data})
         except (ValueError, TypeError):
             pass
 
@@ -297,7 +310,13 @@ class VenueDetailView(APIView):
                 {"success": False, "error": {"code": "not_found", "message": "Venue not found."}},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response({"success": True, "source": "seatgeek", "venue": SeatGeekVenueSerializer(sg_venue).data})
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_booked_map = SeatGeekService.get_venue_booked_ranges_map(
+            [sg_venue.id], from_date=today, to_date=horizon,
+        )
+        sg_context = {"request": request, "sg_venue_booked_ranges_map": sg_booked_map}
+        return Response({"success": True, "source": "seatgeek", "venue": SeatGeekVenueSerializer(sg_venue, context=sg_context).data})
 
 
 class MyVenueProfileView(APIView):
