@@ -108,8 +108,7 @@ class ArtistListView(APIView):
                 target_date=available_on or available_from,
             )
 
-        # Favorites are only defined for internal artists; SG performers can't be favorited.
-        sg_qs = None if favorites_only else SeatGeekService.search_performers(
+        sg_qs = SeatGeekService.search_performers(
             query=query,
             available_on=available_on,
             available_from=available_from,
@@ -120,12 +119,25 @@ class ArtistListView(APIView):
             radius_miles=radius,
         )
 
+        # When filtering by favorites, restrict SG performers to those the user has favorited.
+        if favorites_only:
+            if not request.user.is_authenticated:
+                sg_qs = sg_qs.none()
+            else:
+                from .models import Favorite
+                fav_sg_ids = list(
+                    Favorite.objects
+                    .filter(user=request.user, seatgeek_performer__isnull=False)
+                    .values_list("seatgeek_performer_id", flat=True)
+                )
+                sg_qs = sg_qs.filter(pk__in=fav_sg_ids)
+
         paginator = self.pagination_class()
         limit  = paginator.get_limit(request)  or paginator.default_limit
         offset = paginator.get_offset(request)
 
         internal_count = internal_qs.count()
-        sg_count       = sg_qs.count() if sg_qs is not None else 0
+        sg_count       = sg_qs.count()
         total          = internal_count + sg_count
 
         # Slice only the rows needed for this page from each source.
@@ -134,11 +146,7 @@ class ArtistListView(APIView):
         int_page   = list(internal_qs[int_start:int_end])
         remaining  = limit - len(int_page)
         sg_start   = max(0, offset - internal_count)
-        sg_page    = (
-            list(sg_qs[sg_start: sg_start + remaining])
-            if sg_qs is not None and remaining > 0
-            else []
-        )
+        sg_page    = list(sg_qs[sg_start: sg_start + remaining]) if remaining > 0 else []
 
         today = timezone.now().date()
         horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
