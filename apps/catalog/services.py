@@ -222,6 +222,47 @@ class FavoritesService:
         sg = SeatGeekPerformer.objects.filter(pk=raw).first()
         return None, sg
 
+    @staticmethod
+    def get_or_create_list(user: User):
+        from .models import FavoriteList
+
+        fav_list, _ = FavoriteList.objects.get_or_create(user=user)
+        return fav_list
+
+    @staticmethod
+    def enable_sharing(user: User):
+        from .models import FavoriteList
+
+        fav_list, _ = FavoriteList.objects.get_or_create(user=user)
+        if not fav_list.is_shared:
+            fav_list.is_shared = True
+            fav_list.save(update_fields=["is_shared", "updated_at"])
+        return fav_list
+
+    @staticmethod
+    def disable_sharing(user: User):
+        from .models import FavoriteList
+
+        fav_list, _ = FavoriteList.objects.get_or_create(user=user)
+        if fav_list.is_shared:
+            fav_list.is_shared = False
+            fav_list.save(update_fields=["is_shared", "updated_at"])
+        return fav_list
+
+    @staticmethod
+    def get_shared_list(token: str):
+        from rest_framework.exceptions import NotFound
+
+        from .models import FavoriteList
+
+        try:
+            fav_list = FavoriteList.objects.select_related("user").get(share_token=token)
+        except (FavoriteList.DoesNotExist, ValueError):
+            raise NotFound("Shared list not found.")
+        if not fav_list.is_shared:
+            raise NotFound("Shared list not found.")
+        return fav_list
+
 
 class SeatGeekService:
     @staticmethod
