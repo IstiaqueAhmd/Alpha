@@ -8,7 +8,7 @@ from apps.accounts.serializers import UserSerializer
 from apps.seatgeek.models import Performers as SeatGeekPerformer
 from apps.seatgeek.models import Venues as SeatGeekVenue
 
-from .models import ArtistProfile, Favorite, Genre, RecentSearch, VenueProfile
+from .models import ArtistProfile, Favorite, FavoriteList, Genre, RecentSearch, VenueProfile
 
 AVAILABILITY_WINDOW_DAYS = 365
 
@@ -252,6 +252,22 @@ class VenueProfileUpdateSerializer(serializers.ModelSerializer):
 
 class FavoriteCreateSerializer(serializers.Serializer):
     artist_id = serializers.CharField(max_length=191)
+
+
+class FavoriteListSerializer(serializers.ModelSerializer):
+    share_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FavoriteList
+        fields = ("share_token", "is_shared", "share_url", "updated_at")
+        read_only_fields = ("share_token", "is_shared", "share_url", "updated_at")
+
+    def get_share_url(self, obj) -> str | None:
+        if not obj.is_shared:
+            return None
+        request = self.context.get("request")
+        path = f"/api/v1/catalog/favorites/shared/{obj.share_token}/"
+        return request.build_absolute_uri(path) if request else path
 
 
 class RecentSearchSerializer(serializers.ModelSerializer):
