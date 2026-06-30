@@ -4,11 +4,13 @@ from .views import (
     ArtistDetailView,
     ArtistListView,
     FavoriteDeleteView,
+    FavoriteShareView,
     FavoritesView,
     GenreListView,
     MyArtistProfileView,
     MyVenueProfileView,
     RecentSearchesView,
+    SharedFavoritesView,
     VenueDetailView,
     VenueListView,
 )
@@ -24,6 +26,8 @@ urlpatterns = [
     path("venues/me/", MyVenueProfileView.as_view(), name="venue-me"),
     path("venues/<str:venue_id>/", VenueDetailView.as_view(), name="venue-detail"),
     path("favorites/", FavoritesView.as_view(), name="favorites"),
+    path("favorites/share/", FavoriteShareView.as_view(), name="favorites-share"),
+    path("favorites/shared/<str:token>/", SharedFavoritesView.as_view(), name="favorites-shared"),
     path("favorites/<str:artist_id>/", FavoriteDeleteView.as_view(), name="favorite-delete"),
     path("recent-searches/", RecentSearchesView.as_view(), name="recent-searches"),
 ]
