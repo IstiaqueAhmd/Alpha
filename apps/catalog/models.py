@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
@@ -134,3 +136,18 @@ class RecentSearch(TimeStampedModel):
         db_table = "recent_searches"
         ordering = ("-created_at",)
         indexes = [models.Index(fields=["user", "-created_at"])]
+
+
+class FavoriteList(TimeStampedModel):
+    """One-per-user record that controls whether a user's favorites list is publicly shareable."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="favorite_list",
+    )
+    share_token = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True)
+    is_shared = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "favorite_lists"
