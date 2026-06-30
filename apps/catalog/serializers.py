@@ -387,6 +387,7 @@ class SeatGeekVenueSerializer(serializers.ModelSerializer):
     website = serializers.CharField(source="provider_url")
     booked_dates = serializers.SerializerMethodField()
     available_ranges = serializers.SerializerMethodField()
+    important_dates = serializers.SerializerMethodField()
 
     class Meta:
         model = SeatGeekVenue
@@ -408,11 +409,16 @@ class SeatGeekVenueSerializer(serializers.ModelSerializer):
             "provider_name",
             "booked_dates",
             "available_ranges",
+            "important_dates",
             "created_at",
         )
 
     def get_booked_dates(self, obj) -> list[dict]:
         return self._booked_ranges(obj)
+
+    def get_important_dates(self, obj) -> list[dict]:
+        important_map = self.context.get("sg_venue_important_dates_map") or {}
+        return important_map.get(obj.id, [])
 
     def get_available_ranges(self, obj) -> list[dict]:
         today = timezone.now().date()

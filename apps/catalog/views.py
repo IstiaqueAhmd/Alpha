@@ -254,12 +254,19 @@ class VenueListView(APIView):
     permission_classes = [AllowAny]
     pagination_class = StandardPagination
 
+    # Fall back to 50-mile radius when the caller provides coordinates but
+    # omits an explicit radius.
+    DEFAULT_RADIUS_MILES = 50.0
+
     def get(self, request):
         params = request.query_params
         query = params.get("q") or None
         latitude = _parse_float(params.get("latitude"))
         longitude = _parse_float(params.get("longitude"))
         radius_miles = _parse_float(params.get("radius_miles"))
+        # Apply default radius when coordinates are provided without one.
+        if latitude is not None and longitude is not None and radius_miles is None:
+            radius_miles = self.DEFAULT_RADIUS_MILES
 
         internal_qs = CatalogService.search_venues(
             query=query,
@@ -291,10 +298,23 @@ class VenueListView(APIView):
 
         today = timezone.now().date()
         horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_venue_ids = [v.id for v in sg_page]
         sg_booked_map = SeatGeekService.get_venue_booked_ranges_map(
-            [v.id for v in sg_page], from_date=today, to_date=horizon,
+            sg_venue_ids, from_date=today, to_date=horizon,
         )
-        sg_context = {"request": request, "sg_venue_booked_ranges_map": sg_booked_map}
+
+        # Compute important dates (+-2 day buffer) only when geo params are present.
+        sg_important_map: dict = {}
+        if latitude is not None and longitude is not None and radius_miles and sg_venue_ids:
+            sg_important_map = SeatGeekService.get_venue_important_dates_map(
+                sg_venue_ids, from_date=today, to_date=horizon,
+            )
+
+        sg_context = {
+            "request": request,
+            "sg_venue_booked_ranges_map": sg_booked_map,
+            "sg_venue_important_dates_map": sg_important_map,
+        }
 
         int_data = [{"source": "internal", **VenueProfileSerializer(v, context={"request": request}).data}  for v in int_page]
         sg_data  = [{"source": "seatgeek", **SeatGeekVenueSerializer(v, context=sg_context).data} for v in sg_page]

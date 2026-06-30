@@ -431,6 +431,88 @@ class SeatGeekService:
         return out
 
     @staticmethod
+    def get_venue_important_dates_map(
+        venue_ids: list[str],
+        *,
+        from_date: date,
+        to_date: date,
+        buffer_days: int = 2,
+    ) -> dict[str, list[dict]]:
+        """venue_id → buffer dates (+-buffer_days) around events at that venue.
+
+        Actual event dates are already covered by ``booked_dates``; only the
+        surrounding buffer days are returned.  Results are clipped to
+        [from_date, to_date] and deduplicated per venue.
+        """
+        from apps.seatgeek.models import Events
+
+        if not venue_ids:
+            return {}
+
+        expanded_from = from_date - timedelta(days=buffer_days)
+        expanded_to = to_date + timedelta(days=buffer_days)
+
+        rows = (
+            Events.objects
+            .select_related("venue")
+            .filter(
+                venue_id__in=venue_ids,
+                start_date__lte=expanded_to,
+                end_date__gte=expanded_from,
+            )
+            .order_by("start_date")
+        )
+
+        out: dict[str, list[dict]] = {}
+        for ev in rows:
+            if not ev.venue_id:
+                continue
+
+            venue = ev.venue
+            venue_name = venue.name if venue else (ev.location_name or "")
+            venue_city = venue.city if venue else ""
+
+            # Build the set of actual event dates so they can be excluded.
+            event_dates: set[date] = set()
+            d = ev.start_date
+            while d <= ev.end_date:
+                event_dates.add(d)
+                d += timedelta(days=1)
+
+            venue_seen = out.setdefault(ev.venue_id, [])
+            seen_dates = {entry["date"] for entry in venue_seen}
+
+            for offset in range(1, buffer_days + 1):
+                before = ev.start_date - timedelta(days=offset)
+                after = ev.end_date + timedelta(days=offset)
+
+                for buf_date, reason in [
+                    (before, f"{offset} day{'s' if offset > 1 else ''} before event"),
+                    (after, f"{offset} day{'s' if offset > 1 else ''} after event"),
+                ]:
+                    if buf_date < from_date or buf_date > to_date:
+                        continue
+                    if buf_date in event_dates:
+                        continue
+                    formatted = buf_date.strftime("%m-%d-%Y")
+                    if formatted in seen_dates:
+                        continue
+                    seen_dates.add(formatted)
+                    venue_seen.append({
+                        "date": formatted,
+                        "weekday": buf_date.strftime("%a"),
+                        "reason": reason,
+                        "event_name": ev.name,
+                        "event_id": ev.id,
+                        "venue": venue_name,
+                        "city": venue_city,
+                    })
+
+        for vid in out:
+            out[vid].sort(key=lambda x: x["date"])
+        return out
+
+    @staticmethod
     def get_important_dates_map(
         performer_ids: list[str],
         *,
