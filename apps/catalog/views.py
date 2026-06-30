@@ -14,6 +14,7 @@ from .serializers import (
     ArtistProfileSerializer,
     ArtistProfileUpdateSerializer,
     FavoriteCreateSerializer,
+    FavoriteListSerializer,
     GenreSerializer,
     RecentSearchSerializer,
     SeatGeekPerformerSerializer,
@@ -418,3 +419,69 @@ class RecentSearchesView(APIView):
             {"success": True, "results": RecentSearchSerializer(searches, many=True).data},
             status=status.HTTP_200_OK,
         )
+
+
+class FavoriteShareView(APIView):
+    """Owner-only: inspect, enable, or disable sharing for their favorites list."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fav_list = FavoritesService.get_or_create_list(request.user)
+        return Response(
+            {"success": True, "share": FavoriteListSerializer(fav_list, context={"request": request}).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        fav_list = FavoritesService.enable_sharing(request.user)
+        return Response(
+            {"success": True, "share": FavoriteListSerializer(fav_list, context={"request": request}).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        fav_list = FavoritesService.disable_sharing(request.user)
+        return Response(
+            {"success": True, "share": FavoriteListSerializer(fav_list, context={"request": request}).data},
+            status=status.HTTP_200_OK,
+        )
+
+
+class SharedFavoritesView(APIView):
+    """Public endpoint — renders the favorites list of the user who owns the share token."""
+
+    permission_classes = [AllowAny]
+    pagination_class = StandardPagination
+
+    def get(self, request, token: str):
+        fav_list = FavoritesService.get_shared_list(token)
+        favorites = list(FavoritesService.list_for(fav_list.user))
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(favorites, request, view=self)
+
+        sg_perfs = [f.seatgeek_performer for f in page if f.seatgeek_performer_id]
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_booked_map = (
+            SeatGeekService.get_booked_ranges_map(
+                [p.id for p in sg_perfs], from_date=today, to_date=horizon,
+            )
+            if sg_perfs else {}
+        )
+        sg_context = {"request": request, "sg_booked_ranges_map": sg_booked_map}
+
+        data = []
+        for fav in page:
+            if fav.artist_id:
+                data.append({
+                    "source": "internal",
+                    **ArtistProfileSerializer(fav.artist, context={"request": request}).data,
+                })
+            elif fav.seatgeek_performer_id:
+                data.append({
+                    "source": "seatgeek",
+                    **SeatGeekPerformerSerializer(fav.seatgeek_performer, context=sg_context).data,
+                })
+        return paginator.get_paginated_response(data)
