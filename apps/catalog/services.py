@@ -204,7 +204,7 @@ class FavoritesService:
     def list_for(user: User) -> QuerySet[Favorite]:
         return (
             Favorite.objects
-            .select_related("artist__user", "seatgeek_performer")
+            .select_related("artist__user", "seatgeek_performer", "venue__user", "seatgeek_venue")
             .prefetch_related("artist__genres", "seatgeek_performer__performergenres_set")
             .filter(user=user)
             .order_by("-created_at")
@@ -220,6 +220,42 @@ class FavoritesService:
             if artist:
                 return artist, None
         sg = SeatGeekPerformer.objects.filter(pk=raw).first()
+        return None, sg
+
+    @staticmethod
+    def add_venue(*, user: User, venue_id: str) -> "Favorite":
+        venue, sg_venue = FavoritesService._resolve_venue_target(venue_id)
+        if not venue and not sg_venue:
+            raise NotFound("Venue not found.")
+        favorite, _ = Favorite.objects.get_or_create(
+            user=user, venue=venue, seatgeek_venue=sg_venue,
+            defaults={"artist": None, "seatgeek_performer": None},
+        )
+        return favorite
+
+    @staticmethod
+    def remove_venue(*, user: User, venue_id: str) -> None:
+        raw = str(venue_id)
+        if raw.isdigit():
+            removed, _ = Favorite.objects.filter(
+                user=user, venue_id=int(raw), seatgeek_venue__isnull=True,
+            ).delete()
+            if removed:
+                return
+        Favorite.objects.filter(
+            user=user, seatgeek_venue_id=raw, venue__isnull=True,
+        ).delete()
+
+    @staticmethod
+    def _resolve_venue_target(venue_id: str):
+        from apps.seatgeek.models import Venues as SeatGeekVenue
+
+        raw = str(venue_id)
+        if raw.isdigit():
+            venue = VenueProfile.objects.filter(pk=int(raw)).first()
+            if venue:
+                return venue, None
+        sg = SeatGeekVenue.objects.filter(pk=raw).first()
         return None, sg
 
     @staticmethod
@@ -262,6 +298,50 @@ class FavoritesService:
         if not fav_list.is_shared:
             raise NotFound("Shared list not found.")
         return fav_list
+
+    # ------------------------------------------------------------------ venue sharing
+
+    @staticmethod
+    def get_or_create_venue_list(user: User):
+        from .models import FavoriteList
+
+        fav_list, _ = FavoriteList.objects.get_or_create(user=user)
+        return fav_list
+
+    @staticmethod
+    def enable_venue_sharing(user: User):
+        from .models import FavoriteList
+
+        fav_list, _ = FavoriteList.objects.get_or_create(user=user)
+        if not fav_list.venue_is_shared:
+            fav_list.venue_is_shared = True
+            fav_list.save(update_fields=["venue_is_shared", "updated_at"])
+        return fav_list
+
+    @staticmethod
+    def disable_venue_sharing(user: User):
+        from .models import FavoriteList
+
+        fav_list, _ = FavoriteList.objects.get_or_create(user=user)
+        if fav_list.venue_is_shared:
+            fav_list.venue_is_shared = False
+            fav_list.save(update_fields=["venue_is_shared", "updated_at"])
+        return fav_list
+
+    @staticmethod
+    def get_shared_venue_list(token: str):
+        from rest_framework.exceptions import NotFound
+
+        from .models import FavoriteList
+
+        try:
+            fav_list = FavoriteList.objects.select_related("user").get(venue_share_token=token)
+        except (FavoriteList.DoesNotExist, ValueError):
+            raise NotFound("Shared venue list not found.")
+        if not fav_list.venue_is_shared:
+            raise NotFound("Shared venue list not found.")
+        return fav_list
+
 
 
 class SeatGeekService:

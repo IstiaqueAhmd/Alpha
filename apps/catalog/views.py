@@ -19,6 +19,8 @@ from .serializers import (
     RecentSearchSerializer,
     SeatGeekPerformerSerializer,
     SeatGeekVenueSerializer,
+    VenueFavoriteCreateSerializer,
+    VenueFavoriteListSerializer,
     VenueProfileSerializer,
     VenueProfileUpdateSerializer,
 )
@@ -391,6 +393,7 @@ class FavoritesView(APIView):
         page = paginator.paginate_queryset(favorites, request, view=self)
 
         sg_perfs = [f.seatgeek_performer for f in page if f.seatgeek_performer_id]
+        sg_venues = [f.seatgeek_venue for f in page if f.seatgeek_venue_id]
         today = timezone.now().date()
         horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
         sg_booked_map = (
@@ -399,19 +402,40 @@ class FavoritesView(APIView):
             )
             if sg_perfs else {}
         )
+        sg_venue_booked_map = (
+            SeatGeekService.get_venue_booked_ranges_map(
+                [v.id for v in sg_venues], from_date=today, to_date=horizon,
+            )
+            if sg_venues else {}
+        )
         sg_context = {"request": request, "sg_booked_ranges_map": sg_booked_map}
+        sg_venue_context = {"request": request, "sg_venue_booked_ranges_map": sg_venue_booked_map}
 
         data = []
         for fav in page:
             if fav.artist_id:
                 data.append({
+                    "type": "artist",
                     "source": "internal",
                     **ArtistProfileSerializer(fav.artist, context={"request": request}).data,
                 })
             elif fav.seatgeek_performer_id:
                 data.append({
+                    "type": "artist",
                     "source": "seatgeek",
                     **SeatGeekPerformerSerializer(fav.seatgeek_performer, context=sg_context).data,
+                })
+            elif fav.venue_id:
+                data.append({
+                    "type": "venue",
+                    "source": "internal",
+                    **VenueProfileSerializer(fav.venue, context={"request": request}).data,
+                })
+            elif fav.seatgeek_venue_id:
+                data.append({
+                    "type": "venue",
+                    "source": "seatgeek",
+                    **SeatGeekVenueSerializer(fav.seatgeek_venue, context=sg_venue_context).data,
                 })
         return paginator.get_paginated_response(data)
 
@@ -422,11 +446,68 @@ class FavoritesView(APIView):
         return Response({"success": True}, status=status.HTTP_201_CREATED)
 
 
+class VenueFavoritesView(APIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
+
+    def get(self, request):
+        """List only venue favourites for the authenticated user."""
+        from .models import Favorite
+        favorites = list(
+            Favorite.objects
+            .select_related("venue__user", "seatgeek_venue")
+            .filter(user=request.user)
+            .exclude(venue__isnull=True, seatgeek_venue__isnull=True)
+            .order_by("-created_at")
+        )
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(favorites, request, view=self)
+
+        sg_venues = [f.seatgeek_venue for f in page if f.seatgeek_venue_id]
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_venue_booked_map = (
+            SeatGeekService.get_venue_booked_ranges_map(
+                [v.id for v in sg_venues], from_date=today, to_date=horizon,
+            )
+            if sg_venues else {}
+        )
+        sg_venue_context = {"request": request, "sg_venue_booked_ranges_map": sg_venue_booked_map}
+
+        data = []
+        for fav in page:
+            if fav.venue_id:
+                data.append({
+                    "source": "internal",
+                    **VenueProfileSerializer(fav.venue, context={"request": request}).data,
+                })
+            elif fav.seatgeek_venue_id:
+                data.append({
+                    "source": "seatgeek",
+                    **SeatGeekVenueSerializer(fav.seatgeek_venue, context=sg_venue_context).data,
+                })
+        return paginator.get_paginated_response(data)
+
+    def post(self, request):
+        serializer = VenueFavoriteCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        FavoritesService.add_venue(user=request.user, venue_id=serializer.validated_data["venue_id"])
+        return Response({"success": True}, status=status.HTTP_201_CREATED)
+
+
 class FavoriteDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, artist_id: str):
         FavoritesService.remove(user=request.user, artist_id=artist_id)
+        return Response({"success": True}, status=status.HTTP_204_NO_CONTENT)
+
+
+class VenueFavoriteDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, venue_id: str):
+        FavoritesService.remove_venue(user=request.user, venue_id=venue_id)
         return Response({"success": True}, status=status.HTTP_204_NO_CONTENT)
 
 
@@ -482,6 +563,7 @@ class SharedFavoritesView(APIView):
         page = paginator.paginate_queryset(favorites, request, view=self)
 
         sg_perfs = [f.seatgeek_performer for f in page if f.seatgeek_performer_id]
+        sg_venues = [f.seatgeek_venue for f in page if f.seatgeek_venue_id]
         today = timezone.now().date()
         horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
         sg_booked_map = (
@@ -490,18 +572,108 @@ class SharedFavoritesView(APIView):
             )
             if sg_perfs else {}
         )
+        sg_venue_booked_map = (
+            SeatGeekService.get_venue_booked_ranges_map(
+                [v.id for v in sg_venues], from_date=today, to_date=horizon,
+            )
+            if sg_venues else {}
+        )
         sg_context = {"request": request, "sg_booked_ranges_map": sg_booked_map}
+        sg_venue_context = {"request": request, "sg_venue_booked_ranges_map": sg_venue_booked_map}
 
         data = []
         for fav in page:
             if fav.artist_id:
                 data.append({
+                    "type": "artist",
                     "source": "internal",
                     **ArtistProfileSerializer(fav.artist, context={"request": request}).data,
                 })
             elif fav.seatgeek_performer_id:
                 data.append({
+                    "type": "artist",
                     "source": "seatgeek",
                     **SeatGeekPerformerSerializer(fav.seatgeek_performer, context=sg_context).data,
+                })
+            elif fav.venue_id:
+                data.append({
+                    "type": "venue",
+                    "source": "internal",
+                    **VenueProfileSerializer(fav.venue, context={"request": request}).data,
+                })
+            elif fav.seatgeek_venue_id:
+                data.append({
+                    "type": "venue",
+                    "source": "seatgeek",
+                    **SeatGeekVenueSerializer(fav.seatgeek_venue, context=sg_venue_context).data,
+                })
+        return paginator.get_paginated_response(data)
+
+
+class VenueFavoriteShareView(APIView):
+    """Owner-only: inspect, enable, or disable sharing for their venue favorites list."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fav_list = FavoritesService.get_or_create_venue_list(request.user)
+        return Response(
+            {"success": True, "share": VenueFavoriteListSerializer(fav_list, context={"request": request}).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        fav_list = FavoritesService.enable_venue_sharing(request.user)
+        return Response(
+            {"success": True, "share": VenueFavoriteListSerializer(fav_list, context={"request": request}).data},
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        fav_list = FavoritesService.disable_venue_sharing(request.user)
+        return Response(
+            {"success": True, "share": VenueFavoriteListSerializer(fav_list, context={"request": request}).data},
+            status=status.HTTP_200_OK,
+        )
+
+
+class SharedVenueFavoritesView(APIView):
+    """Public endpoint — renders the venue favorites list of the user who owns the venue share token."""
+
+    permission_classes = [AllowAny]
+    pagination_class = StandardPagination
+
+    def get(self, request, token: str):
+        fav_list = FavoritesService.get_shared_venue_list(token)
+        favorites = list(
+            FavoritesService.list_for(fav_list.user)
+            .exclude(venue__isnull=True, seatgeek_venue__isnull=True)
+        )
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(favorites, request, view=self)
+
+        sg_venues = [f.seatgeek_venue for f in page if f.seatgeek_venue_id]
+        today = timezone.now().date()
+        horizon = today + timedelta(days=AVAILABILITY_WINDOW_DAYS)
+        sg_venue_booked_map = (
+            SeatGeekService.get_venue_booked_ranges_map(
+                [v.id for v in sg_venues], from_date=today, to_date=horizon,
+            )
+            if sg_venues else {}
+        )
+        sg_venue_context = {"request": request, "sg_venue_booked_ranges_map": sg_venue_booked_map}
+
+        data = []
+        for fav in page:
+            if fav.venue_id:
+                data.append({
+                    "source": "internal",
+                    **VenueProfileSerializer(fav.venue, context={"request": request}).data,
+                })
+            elif fav.seatgeek_venue_id:
+                data.append({
+                    "source": "seatgeek",
+                    **SeatGeekVenueSerializer(fav.seatgeek_venue, context=sg_venue_context).data,
                 })
         return paginator.get_paginated_response(data)

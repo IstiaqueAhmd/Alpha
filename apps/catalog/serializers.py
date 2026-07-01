@@ -153,6 +153,7 @@ class ArtistProfileUpdateSerializer(serializers.ModelSerializer):
 
 class VenueProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    is_favorited = serializers.SerializerMethodField()
     booked_dates = serializers.SerializerMethodField()
     available_ranges = serializers.SerializerMethodField()
 
@@ -170,11 +171,18 @@ class VenueProfileSerializer(serializers.ModelSerializer):
             "capacity",
             "website",
             "is_published",
+            "is_favorited",
             "booked_dates",
             "available_ranges",
             "created_at",
         )
-        read_only_fields = ("id", "user", "booked_dates", "available_ranges", "created_at")
+        read_only_fields = ("id", "user", "is_favorited", "booked_dates", "available_ranges", "created_at")
+
+    def get_is_favorited(self, obj) -> bool:
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return Favorite.objects.filter(user=request.user, venue=obj).exists()
 
     def get_booked_dates(self, obj) -> list[dict]:
         from apps.bookings.models import AvailabilitySlot
@@ -254,6 +262,10 @@ class FavoriteCreateSerializer(serializers.Serializer):
     artist_id = serializers.CharField(max_length=191)
 
 
+class VenueFavoriteCreateSerializer(serializers.Serializer):
+    venue_id = serializers.CharField(max_length=191)
+
+
 class FavoriteListSerializer(serializers.ModelSerializer):
     share_url = serializers.SerializerMethodField()
 
@@ -268,6 +280,23 @@ class FavoriteListSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         path = f"/api/v1/catalog/favorites/shared/{obj.share_token}/"
         return request.build_absolute_uri(path) if request else path
+
+
+class VenueFavoriteListSerializer(serializers.ModelSerializer):
+    share_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FavoriteList
+        fields = ("venue_share_token", "venue_is_shared", "share_url", "updated_at")
+        read_only_fields = ("venue_share_token", "venue_is_shared", "share_url", "updated_at")
+
+    def get_share_url(self, obj) -> str | None:
+        if not obj.venue_is_shared:
+            return None
+        request = self.context.get("request")
+        path = f"/api/v1/catalog/favorites/venue/shared/{obj.venue_share_token}/"
+        return request.build_absolute_uri(path) if request else path
+
 
 
 class RecentSearchSerializer(serializers.ModelSerializer):
@@ -385,6 +414,7 @@ class SeatGeekVenueSerializer(serializers.ModelSerializer):
     latitude = serializers.FloatField(source="lat")
     longitude = serializers.FloatField(source="long")
     website = serializers.CharField(source="provider_url")
+    is_favorited = serializers.SerializerMethodField()
     booked_dates = serializers.SerializerMethodField()
     available_ranges = serializers.SerializerMethodField()
     important_dates = serializers.SerializerMethodField()
@@ -407,11 +437,18 @@ class SeatGeekVenueSerializer(serializers.ModelSerializer):
             "website",
             "provider_id",
             "provider_name",
+            "is_favorited",
             "booked_dates",
             "available_ranges",
             "important_dates",
             "created_at",
         )
+
+    def get_is_favorited(self, obj) -> bool:
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return Favorite.objects.filter(user=request.user, seatgeek_venue=obj).exists()
 
     def get_booked_dates(self, obj) -> list[dict]:
         return self._booked_ranges(obj)

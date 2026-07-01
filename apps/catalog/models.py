@@ -101,20 +101,52 @@ class Favorite(TimeStampedModel):
         null=True,
         blank=True,
     )
+    venue = models.ForeignKey(
+        VenueProfile,
+        on_delete=models.CASCADE,
+        related_name="favorited_by",
+        null=True,
+        blank=True,
+    )
+    seatgeek_venue = models.ForeignKey(
+        "seatgeek.Venues",
+        on_delete=models.CASCADE,
+        related_name="favorited_by",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "favorites"
         constraints = [
-            models.UniqueConstraint(fields=["user", "artist"], name="unique_user_artist_favorite"),
             models.UniqueConstraint(
-                fields=["user", "seatgeek_performer"], name="unique_user_sg_performer_favorite"
+                fields=["user", "artist"],
+                condition=models.Q(artist__isnull=False),
+                name="unique_user_artist_favorite",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "seatgeek_performer"],
+                condition=models.Q(seatgeek_performer__isnull=False),
+                name="unique_user_sg_performer_favorite",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "venue"],
+                condition=models.Q(venue__isnull=False),
+                name="unique_user_venue_favorite",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "seatgeek_venue"],
+                condition=models.Q(seatgeek_venue__isnull=False),
+                name="unique_user_sg_venue_favorite",
             ),
             models.CheckConstraint(
                 check=(
-                    models.Q(artist__isnull=False, seatgeek_performer__isnull=True)
-                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=False)
+                    models.Q(artist__isnull=False, seatgeek_performer__isnull=True, venue__isnull=True, seatgeek_venue__isnull=True)
+                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=False, venue__isnull=True, seatgeek_venue__isnull=True)
+                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=True, venue__isnull=False, seatgeek_venue__isnull=True)
+                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=True, venue__isnull=True, seatgeek_venue__isnull=False)
                 ),
-                name="favorite_artist_xor_seatgeek",
+                name="favorite_exactly_one_target",
             ),
         ]
         indexes = [models.Index(fields=["user", "-created_at"])]
@@ -146,8 +178,13 @@ class FavoriteList(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="favorite_list",
     )
+    # Artist favourites sharing
     share_token = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True)
     is_shared = models.BooleanField(default=False)
+
+    # Venue favourites sharing
+    venue_share_token = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True)
+    venue_is_shared = models.BooleanField(default=False)
 
     class Meta:
         db_table = "favorite_lists"
