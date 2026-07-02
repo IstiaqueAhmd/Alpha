@@ -160,6 +160,8 @@ class RecentSearch(TimeStampedModel):
     )
     query = models.CharField(max_length=255, blank=True)
     location = models.CharField(max_length=255, blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     radius_miles = models.PositiveIntegerField(null=True, blank=True)
     genres = models.JSONField(default=list, blank=True)
     target_date = models.DateField(null=True, blank=True)

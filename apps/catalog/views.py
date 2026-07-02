@@ -106,6 +106,8 @@ class ArtistListView(APIView):
                 user=request.user,
                 query=query or "",
                 location=params.get("location", "") or "",
+                latitude=latitude,
+                longitude=longitude,
                 radius_miles=int(radius) if radius else None,
                 genres=genre_slugs,
                 target_date=available_on or available_from,

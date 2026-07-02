@@ -302,7 +302,7 @@ class VenueFavoriteListSerializer(serializers.ModelSerializer):
 class RecentSearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecentSearch
-        fields = ("id", "query", "location", "radius_miles", "genres", "target_date", "created_at")
+        fields = ("id", "query", "location", "latitude", "longitude", "radius_miles", "genres", "target_date", "created_at")
         read_only_fields = ("id", "created_at")
 
 
