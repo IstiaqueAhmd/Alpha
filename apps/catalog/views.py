@@ -110,7 +110,7 @@ class ArtistListView(APIView):
                 longitude=longitude,
                 radius_miles=int(radius) if radius else None,
                 genres=genre_slugs,
-                target_date=available_on or available_from,
+                target_date=available_on or available_from or available_to,
             )
 
         sg_qs = SeatGeekService.search_performers(
@@ -271,6 +271,18 @@ class VenueListView(APIView):
         # Apply default radius when coordinates are provided without one.
         if latitude is not None and longitude is not None and radius_miles is None:
             radius_miles = self.DEFAULT_RADIUS_MILES
+
+        if request.user.is_authenticated and (
+            query or latitude is not None or longitude is not None or radius_miles is not None
+        ):
+            RecentSearchService.record(
+                user=request.user,
+                query=query or "",
+                location=params.get("location", "") or "",
+                latitude=latitude,
+                longitude=longitude,
+                radius_miles=int(radius_miles) if radius_miles else None,
+            )
 
         internal_qs = CatalogService.search_venues(
             query=query,
