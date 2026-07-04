@@ -718,22 +718,47 @@ class RecentSearchService:
     @classmethod
     def record(cls, *, user: User, **fields) -> RecentSearch:
         if fields.get("latitude") and fields.get("longitude") and not fields.get("location"):
+            lat = float(fields["latitude"])
+            lon = float(fields["longitude"])
+            location_name = None
+
+            # Attempt 1: Nominatim Reverse Geocoding (OpenStreetMap)
             try:
-                from apps.seatgeek.models import Venues
-                from django.db.models import F
-                from django.db.models.functions import Power
-                
-                lat = float(fields["latitude"])
-                lon = float(fields["longitude"])
-                nearest = Venues.objects.annotate(
-                    lat_diff=F('lat') - lat,
-                    lon_diff=F('long') - lon,
-                    dist=Power('lat_diff', 2) + Power('lon_diff', 2)
-                ).order_by('dist').first()
-                if nearest and nearest.city:
-                    fields["location"] = f"{nearest.city}, {nearest.state}" if nearest.state else nearest.city
-            except Exception:
-                pass
+                import urllib.request
+                import json
+                url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+                req = urllib.request.Request(url, headers={'User-Agent': 'GetAvailsApp/1.0'})
+                with urllib.request.urlopen(req, timeout=1.5) as response:
+                    data = json.loads(response.read().decode())
+                    address = data.get("address", {})
+                    city = address.get("city") or address.get("town") or address.get("village") or address.get("county")
+                    state = address.get("state")
+                    if city:
+                        location_name = f"{city}, {state}" if state else city
+            except Exception as e:
+                import sys
+                print(f"Nominatim geocoding failed: {e}", file=sys.stderr)
+
+            # Attempt 2: Nearest Venue in Database Fallback (Postgres/SQLite compatible)
+            if not location_name:
+                try:
+                    from apps.seatgeek.models import Venues
+                    from django.db.models import F
+                    
+                    nearest = Venues.objects.annotate(
+                        lat_diff=F('lat') - lat,
+                        lon_diff=F('long') - lon,
+                        dist=F('lat_diff') * F('lat_diff') + F('lon_diff') * F('lon_diff')
+                    ).order_by('dist').first()
+                    
+                    if nearest and nearest.city:
+                        location_name = f"{nearest.city}, {nearest.state}" if nearest.state else nearest.city
+                except Exception as e:
+                    import sys
+                    print(f"Error in venue location approximation: {e}", file=sys.stderr)
+
+            if location_name:
+                fields["location"] = location_name
                 
         record = RecentSearch.objects.create(user=user, **fields)
         # trim to last MAX_HISTORY
