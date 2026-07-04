@@ -300,10 +300,41 @@ class VenueFavoriteListSerializer(serializers.ModelSerializer):
 
 
 class RecentSearchSerializer(serializers.ModelSerializer):
+    display_title = serializers.SerializerMethodField()
+
     class Meta:
         model = RecentSearch
-        fields = ("id", "query", "location", "latitude", "longitude", "radius_miles", "genres", "target_date", "created_at")
+        fields = ("id", "query", "location", "latitude", "longitude", "radius_miles", "genres", "target_date", "created_at", "display_title")
         read_only_fields = ("id", "created_at")
+
+    def get_display_title(self, obj):
+        parts = []
+        if obj.query:
+            parts.append(f'"{obj.query}"')
+        
+        if obj.genres:
+            genres_str = ", ".join(str(g).replace("-", " ").title() for g in obj.genres)
+            parts.append(genres_str)
+            
+        if not parts:
+            parts.append("Search")
+            
+        main_str = " - ".join(parts)
+        
+        loc_str = obj.location
+        if not loc_str and obj.latitude and obj.longitude:
+            loc_str = f"{float(obj.latitude):.2f}, {float(obj.longitude):.2f}"
+            
+        if loc_str:
+            main_str += f" near {loc_str}"
+            
+        if obj.radius_miles:
+            main_str += f" ({obj.radius_miles}mi)"
+            
+        if obj.target_date:
+            main_str += f" on {obj.target_date.strftime('%b %d, %Y')}"
+            
+        return main_str
 
 
 class SeatGeekPerformerSerializer(serializers.ModelSerializer):

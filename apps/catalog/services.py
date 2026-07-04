@@ -717,6 +717,24 @@ class RecentSearchService:
 
     @classmethod
     def record(cls, *, user: User, **fields) -> RecentSearch:
+        if fields.get("latitude") and fields.get("longitude") and not fields.get("location"):
+            try:
+                from apps.seatgeek.models import Venues
+                from django.db.models import F
+                from django.db.models.functions import Power
+                
+                lat = float(fields["latitude"])
+                lon = float(fields["longitude"])
+                nearest = Venues.objects.annotate(
+                    lat_diff=F('lat') - lat,
+                    lon_diff=F('long') - lon,
+                    dist=Power('lat_diff', 2) + Power('lon_diff', 2)
+                ).order_by('dist').first()
+                if nearest and nearest.city:
+                    fields["location"] = f"{nearest.city}, {nearest.state}" if nearest.state else nearest.city
+            except Exception:
+                pass
+                
         record = RecentSearch.objects.create(user=user, **fields)
         # trim to last MAX_HISTORY
         ids_to_keep = list(
