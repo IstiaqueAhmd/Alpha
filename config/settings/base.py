@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.messaging",
     "apps.seatgeek",
     "apps.teams",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -127,6 +128,21 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "GetAvails API",
+    "DESCRIPTION": "Django REST Framework API for GetAvails.",
+    "VERSION": "1.0.0",
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],
+    "SCHEMA_PATH_PREFIX": "/api/v1",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SORT_OPERATIONS": False,
+    "SWAGGER_UI_SETTINGS": {
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+    },
 }
 
 SIMPLE_JWT = {
