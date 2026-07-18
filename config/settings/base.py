@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.bookings",
     "apps.messaging",
     "apps.seatgeek",
+    "apps.teams",
 ]
 
 MIDDLEWARE = [

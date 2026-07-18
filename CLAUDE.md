@@ -11,7 +11,9 @@ Django + DRF API for **ArtistBook** — an artist-booking platform. Frontends us
 
 ## Hard rules
 
-- **APIView only.** Every DRF endpoint must subclass `rest_framework.views.APIView` directly. Do not use `GenericAPIView`, `ViewSet`, `ModelViewSet`, or any of their mixins. Pagination is opt-in per-view by setting `pagination_class = StandardPagination` and calling it explicitly (see `apps/bookings/views.py` for the pattern).
+- **Don't touch existing views.** Every endpoint written before drf-spectacular was added subclasses `rest_framework.views.APIView` directly. Leave them that way — do not migrate them to generic views, and do not refactor them to make the schema prettier. They are live and working. In these views, pagination is opt-in per-view by setting `pagination_class = StandardPagination` and calling it explicitly (see `apps/bookings/views.py` for the pattern).
+- **New views may use `GenericAPIView` / viewsets.** The old APIView-only restriction is lifted for new code. Prefer generic views for new endpoints: drf-spectacular introspects `serializer_class` / `get_queryset`, so a generic view documents itself, while a bare `APIView` produces an endpoint with no request or response body in the schema. Business logic still lives in `<app>/services.py` — a generic view is a thinner view, not a place for domain rules.
+- Consequence to know: the ~42 pre-existing APIView endpoints appear in `/api/v1/schema/` as paths with **no bodies** (`description: No response body`, empty `components`). That is expected, not a broken setup. Documenting one of them requires an `@extend_schema` decorator, which counts as touching an existing view — ask first.
 - **No emojis in code or files** unless explicitly requested.
 - **Don't create docs/READMEs** unless explicitly requested.
 
