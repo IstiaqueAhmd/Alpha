@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
 from . import exceptions as exc
 from .emails import send_invitation_email
@@ -122,6 +122,24 @@ class TeamService:
             .select_related("user", "team")
             .order_by("role", "user__name")
         )
+
+    @staticmethod
+    def member_counts(team: Team) -> dict[str, int]:
+        rows = (
+            TeamMembership.objects.filter(team=team)
+            .values("status")
+            .annotate(count=Count("id"))
+        )
+        by_status = {row["status"]: row["count"] for row in rows}
+        active = by_status.get(ApprovalStatus.APPROVED, 0)
+        pending = by_status.get(ApprovalStatus.PENDING, 0)
+        declined = by_status.get(ApprovalStatus.REJECTED, 0)
+        return {
+            "total": active + pending + declined,
+            "active": active,
+            "pending": pending,
+            "declined": declined,
+        }
 
     @staticmethod
     def effective_rank(team: Team, user) -> int | None:

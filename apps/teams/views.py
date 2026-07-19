@@ -97,9 +97,11 @@ class TeamMemberListCreateView(GenericAPIView):
         qs = TeamService.list_members(team)
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(
+        response = paginator.get_paginated_response(
             TeamMembershipSerializer(page, many=True).data
         )
+        response.data["counts"] = TeamService.member_counts(team)
+        return response
 
     def post(self, request, team_id: int):
         team = TeamService.get_for_member(request.user, team_id)
