@@ -10,7 +10,7 @@ def send_invitation_email(*, invitation) -> None:
     """Notify an invitee by email. Mirrors apps.accounts.emails.send_otp_email:
     plain send_mail, DEFAULT_FROM_EMAIL, console backend in dev.
     """
-    accept_url = f"{settings.FRONTEND_URL}/teams/invitations/accept?token={invitation.token}"
+    accept_url = f"{settings.FRONTEND_URL}/teams-invitations-accept?token={invitation.token}"
     role_label = _ROLE_LABELS.get(invitation.role, invitation.role)
     inviter_name = invitation.invited_by.name
 
