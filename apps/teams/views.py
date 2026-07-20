@@ -208,27 +208,37 @@ class InvitationAcceptView(GenericAPIView):
 # --- Superuser review queue --------------------------------------------------
 
 
-class PendingReviewView(GenericAPIView):
+class MembershipReviewListView(GenericAPIView):
+    """Superadmin review queue. Teams are auto-approved on creation, so this
+    is just memberships - no separate team or invitation review step.
+
+    Defaults to the pending queue; `?status=approved` or `?status=rejected`
+    browses reviewed history instead.
+    """
+
     permission_classes = [IsSuperUser]
-    serializer_class = TeamSerializer
+    serializer_class = TeamMembershipSerializer
+    pagination_class = StandardPagination
 
     def get(self, request):
-        # Teams are auto-approved on creation, so the queue is just
-        # memberships now - no separate team or invitation review step.
-        return Response(
-            {
-                "success": True,
-                "memberships": TeamMembershipSerializer(
-                    ApprovalService.pending_memberships(), many=True
-                ).data,
-            },
-            status=status.HTTP_200_OK,
+        qs = ApprovalService.list_memberships(status=request.query_params.get("status"))
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(
+            TeamMembershipSerializer(page, many=True).data
         )
 
 
-class MembershipReviewView(GenericAPIView):
+class MembershipReviewDetailView(GenericAPIView):
     permission_classes = [IsSuperUser]
     serializer_class = ReviewSerializer
+
+    def get(self, request, membership_id: int):
+        membership = ApprovalService.get_membership(membership_id)
+        return Response(
+            {"success": True, "membership": TeamMembershipSerializer(membership).data},
+            status=status.HTTP_200_OK,
+        )
 
     def post(self, request, membership_id: int):
         serializer = self.get_serializer(data=request.data)

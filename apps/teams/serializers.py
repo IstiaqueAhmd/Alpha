@@ -39,18 +39,23 @@ class TeamMembershipSerializer(serializers.ModelSerializer):
     user = TeamUserSerializer(read_only=True)
     rank = serializers.SerializerMethodField()
     role_label = serializers.CharField(source="get_role_display", read_only=True)
+    team_name = serializers.CharField(source="team.name", read_only=True)
+    team_domain = serializers.CharField(source="team.domain", read_only=True)
 
     class Meta:
         model = TeamMembership
         fields = [
             "id",
             "team",
+            "team_name",
+            "team_domain",
             "user",
             "role",
             "role_label",
             "rank",
             "status",
             "approved_at",
+            "review_note",
             "created_at",
         ]
         read_only_fields = fields

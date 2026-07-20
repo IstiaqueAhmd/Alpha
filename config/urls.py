@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/v1/bookings/", include("apps.bookings.urls")),
     path("api/v1/messaging/", include("apps.messaging.urls")),
     path("api/v1/teams/", include("apps.teams.urls")),
+    path("api/v1/notifications/", include("apps.notifications.urls")),
 ]
 
 if "drf_spectacular" in settings.INSTALLED_APPS:

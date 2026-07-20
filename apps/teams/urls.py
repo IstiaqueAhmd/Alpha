@@ -1,5 +1,4 @@
 from django.urls import path
-
 from . import views
 
 app_name = "teams"
@@ -34,10 +33,14 @@ urlpatterns = [
         name="invitation-accept",
     ),
     # Superuser review queue
-    path("review/pending/", views.PendingReviewView.as_view(), name="review-pending"),
+    path(
+        "review/memberships/",
+        views.MembershipReviewListView.as_view(),
+        name="membership-review-list",
+    ),
     path(
         "review/memberships/<int:membership_id>/",
-        views.MembershipReviewView.as_view(),
-        name="review-membership",
+        views.MembershipReviewDetailView.as_view(),
+        name="membership-review-detail",
     ),
 ]

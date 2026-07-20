@@ -8,6 +8,7 @@ from django.utils import timezone
 from . import exceptions as exc
 from .emails import send_invitation_email
 from .models import ApprovalStatus, Team, TeamInvitation, TeamMembership
+from .notifications import notify_invitation_received
 from .roles import is_valid_role, rank_of
 
 User = get_user_model()
@@ -219,6 +220,8 @@ class InvitationService:
             raise exc.DuplicateInvitation()
 
         send_invitation_email(invitation=invitation)
+        notify_invitation_received(invitation=invitation)
+
         return invitation
 
     @staticmethod
@@ -354,12 +357,22 @@ class ApprovalService:
     """
 
     @staticmethod
-    def pending_memberships() -> QuerySet[TeamMembership]:
-        return (
-            TeamMembership.objects.filter(status=ApprovalStatus.PENDING)
-            .select_related("user", "team", "invited_by")
-            .order_by("created_at")
-        )
+    def list_memberships(status: str | None = None) -> QuerySet[TeamMembership]:
+        """Review queue. Defaults to the pending queue; pass an
+        ApprovalStatus value to browse approved/rejected history instead.
+        """
+        qs = TeamMembership.objects.select_related("user", "team", "invited_by", "approved_by")
+        qs = qs.filter(status=status if status else ApprovalStatus.PENDING)
+        return qs.order_by("created_at")
+
+    @staticmethod
+    def get_membership(membership_id: int) -> TeamMembership:
+        try:
+            return TeamMembership.objects.select_related(
+                "user", "team", "invited_by", "approved_by"
+            ).get(pk=membership_id)
+        except TeamMembership.DoesNotExist:
+            raise exc.MembershipNotFound()
 
     @staticmethod
     @transaction.atomic
