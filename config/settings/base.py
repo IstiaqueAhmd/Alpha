@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.seatgeek",
     "apps.teams",
     "apps.notifications",
+    "apps.blog",
     "drf_spectacular",
 ]
 
