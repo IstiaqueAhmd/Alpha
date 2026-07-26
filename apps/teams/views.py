@@ -51,7 +51,7 @@ class TeamListCreateView(GenericAPIView):
     pagination_class = StandardPagination
 
     def get(self, request):
-        qs = TeamService.list_for(request.user)
+        qs = TeamService.list_for(request.user, search=request.query_params.get("search"))
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(TeamSerializer(page, many=True).data)
@@ -94,7 +94,7 @@ class TeamMemberListCreateView(GenericAPIView):
 
     def get(self, request, team_id: int):
         team = TeamService.get_for_member(request.user, team_id)
-        qs = TeamService.list_members(team)
+        qs = TeamService.list_members(team, search=request.query_params.get("search"))
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         response = paginator.get_paginated_response(

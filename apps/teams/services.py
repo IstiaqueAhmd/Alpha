@@ -63,11 +63,13 @@ class TeamService:
         return team
 
     @staticmethod
-    def list_for(user) -> QuerySet[Team]:
+    def list_for(user, search: str | None = None) -> QuerySet[Team]:
         """Approved teams the user belongs to, plus their own pending teams.
 
         The founder keeps sight of a team while it is under review; everyone
         else only sees teams that are live.
+
+        `search` filters by team name (case-insensitive, substring).
         """
         member_of = Q(
             status=ApprovalStatus.APPROVED,
@@ -75,12 +77,15 @@ class TeamService:
             memberships__status=ApprovalStatus.APPROVED,
         )
         founded_by_user = Q(created_by=user)
-        return (
+        qs = (
             Team.objects.filter(member_of | founded_by_user)
             .select_related("created_by")
             .distinct()
             .order_by("-created_at")
         )
+        if search:
+            qs = qs.filter(name__icontains=search)
+        return qs
 
     @staticmethod
     def get_for_member(user, team_id: int) -> Team:
@@ -117,12 +122,17 @@ class TeamService:
             raise exc.NotTeamMember()
 
     @staticmethod
-    def list_members(team: Team) -> QuerySet[TeamMembership]:
-        return (
+    def list_members(team: Team, search: str | None = None) -> QuerySet[TeamMembership]:
+        """Members of `team`. `search` filters by member name or email
+        (case-insensitive, substring)."""
+        qs = (
             TeamMembership.objects.filter(team=team)
             .select_related("user", "team")
             .order_by("role", "user__name")
         )
+        if search:
+            qs = qs.filter(Q(user__name__icontains=search) | Q(user__email__icontains=search))
+        return qs
 
     @staticmethod
     def member_counts(team: Team) -> dict[str, int]:
