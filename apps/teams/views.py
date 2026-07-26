@@ -86,6 +86,11 @@ class TeamDetailView(GenericAPIView):
             status=status.HTTP_200_OK,
         )
 
+    def delete(self, request, team_id: int):
+        team = TeamService.get_for_member(request.user, team_id)
+        TeamService.delete(actor=request.user, team=team)
+        return Response({"success": True}, status=status.HTTP_200_OK)
+
 
 class TeamMemberListCreateView(GenericAPIView):
     permission_classes = [IsAuthenticated]

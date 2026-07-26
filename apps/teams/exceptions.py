@@ -27,6 +27,11 @@ class NotTeamMember(PermissionDenied):
     default_code = "not_team_member"
 
 
+class NotTeamCreator(PermissionDenied):
+    default_detail = "Only the team's creator can delete this team."
+    default_code = "not_team_creator"
+
+
 class RoleDomainMismatch(APIException):
     status_code = status.HTTP_400_BAD_REQUEST
     default_detail = "That role does not belong to this team's domain."

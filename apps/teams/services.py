@@ -111,6 +111,13 @@ class TeamService:
         return team
 
     @staticmethod
+    def delete(*, actor, team: Team) -> None:
+        """Delete a team. Only the user who created it may do this."""
+        if team.created_by_id != actor.id:
+            raise exc.NotTeamCreator()
+        team.delete()
+
+    @staticmethod
     def assert_can_manage(user, team: Team) -> None:
         """Guard for mutations: team must be live and the actor an approved member."""
         if not team.is_approved:
