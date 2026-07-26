@@ -12,6 +12,7 @@ from .serializers import (
     HierarchyRoleSerializer,
     InvitationAcceptSerializer,
     InvitationCreateSerializer,
+    InvitationDeclineSerializer,
     MemberAddSerializer,
     ReviewSerializer,
     TeamCreateSerializer,
@@ -205,6 +206,26 @@ class InvitationAcceptView(GenericAPIView):
                 "success": True,
                 "message": "Invitation accepted. Your membership is awaiting approval.",
                 "membership": TeamMembershipSerializer(membership).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class InvitationDeclineView(GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = InvitationDeclineSerializer
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invitation = InvitationService.decline(
+            user=request.user, token=serializer.validated_data["token"]
+        )
+        return Response(
+            {
+                "success": True,
+                "message": "Invitation declined.",
+                "invitation": TeamInvitationSerializer(invitation).data,
             },
             status=status.HTTP_200_OK,
         )

@@ -137,6 +137,7 @@ class TeamInvitation(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Awaiting Acceptance"
         ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
         REVOKED = "revoked", "Revoked"
 
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name="invitations")

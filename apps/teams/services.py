@@ -305,6 +305,28 @@ class InvitationService:
         return InvitationService._materialize(invitation=invitation, user=user)
 
     @staticmethod
+    @transaction.atomic
+    def decline(*, user, token: str) -> TeamInvitation:
+        """Invitee-initiated decline. Distinct from `revoke`, which is the
+        team side withdrawing the invite - this is the recipient saying no.
+        """
+        try:
+            invitation = TeamInvitation.objects.select_for_update().get(token=token)
+        except TeamInvitation.DoesNotExist:
+            raise exc.InvitationNotFound()
+
+        if invitation.status != TeamInvitation.Status.PENDING:
+            raise exc.InvitationNotAcceptable()
+        if invitation.is_expired:
+            raise exc.InvitationExpired()
+        if invitation.email.lower() != user.email.lower():
+            raise exc.InvitationEmailMismatch()
+
+        invitation.status = TeamInvitation.Status.DECLINED
+        invitation.save(update_fields=["status", "updated_at"])
+        return invitation
+
+    @staticmethod
     def claim_all_for_user(user) -> list[TeamMembership]:
         """Auto-enroll a freshly verified user into every invite awaiting them.
 

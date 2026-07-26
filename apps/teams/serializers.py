@@ -107,6 +107,10 @@ class InvitationAcceptSerializer(serializers.Serializer):
     token = serializers.CharField(max_length=64)
 
 
+class InvitationDeclineSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=64)
+
+
 class ReviewSerializer(serializers.Serializer):
     approve = serializers.BooleanField()
     note = serializers.CharField(required=False, allow_blank=True, default="")

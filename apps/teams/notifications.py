@@ -27,5 +27,6 @@ def notify_invitation_received(*, invitation) -> None:
             "team_id": team.id,
             "team_name": team.name,
             "role": invitation.role,
+            "token": invitation.token,
         },
     )

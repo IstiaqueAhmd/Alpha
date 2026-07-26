@@ -32,6 +32,11 @@ urlpatterns = [
         views.InvitationAcceptView.as_view(),
         name="invitation-accept",
     ),
+    path(
+        "invitations/decline/",
+        views.InvitationDeclineView.as_view(),
+        name="invitation-decline",
+    ),
     # Superuser review queue
     path(
         "review/memberships/",
