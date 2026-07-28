@@ -1,14 +1,14 @@
 from rest_framework import status, viewsets
 from rest_framework.response import Response
+from apps.accounts.permissions import IsAdminOrReadOnly
 from apps.common.pagination import StandardPagination
 from .models import Category, Post
-from .permissions import IsSuperUserOrReadOnly
 from .serializers import CategorySerializer, PostSerializer
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
-    permission_classes = [IsSuperUserOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
     pagination_class = StandardPagination
     lookup_field = "slug"
     queryset = Category.objects.all()
@@ -41,13 +41,13 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 class PostViewSet(viewsets.ModelViewSet):
     serializer_class = PostSerializer
-    permission_classes = [IsSuperUserOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
     pagination_class = StandardPagination
     lookup_field = "slug"
 
     def get_queryset(self):
         user = self.request.user
-        if user and user.is_authenticated and user.is_superuser:
+        if user and user.is_authenticated and user.is_admin:
             return Post.objects.all()
         return Post.objects.filter(is_published=True)
 

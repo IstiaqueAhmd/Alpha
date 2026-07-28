@@ -135,7 +135,6 @@ class RegistrationService:
         name: str,
         email: str,
         password: str,
-        role: str,
         ip_address: str | None = None,
     ) -> tuple[User, str]:
         email_normalized = email.lower().strip()
@@ -146,7 +145,6 @@ class RegistrationService:
             email=email_normalized,
             password=password,
             name=name.strip(),
-            role=role,
             is_active=True,
         )
         otp = OTPService.issue_and_send(
@@ -239,7 +237,7 @@ class PasswordResetService:
 class GoogleAuthService:
     """Verify a Google ID token and resolve it to a user.
 
-    New accounts are created automatically with the TALENT_BUYER role.
+    New accounts are created automatically with the default USER role.
     """
 
     @classmethod
@@ -279,11 +277,9 @@ class GoogleAuthService:
         if user is None:
             user = User.objects.filter(email__iexact=email).first()
             if user is None:
-                # CHANGED: create new user with default role talent-buyer
                 user = User.objects.create(
                     email=email,
                     google_sub=google_sub,
-                    role=User.Role.TALENT_BUYER,
                     email_verified_at=timezone.now(),
                     is_active=True,
                     name=payload.get("name", "").strip() or email.split("@")[0],

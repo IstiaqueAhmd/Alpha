@@ -9,15 +9,12 @@ from .managers import UserManager
 
 class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     class Role(models.TextChoices):
-        ARTIST = "artist", "Artist"
-        AGENT = "agent", "Agent"
-        TALENT_BUYER = "talent-buyer", "Talent Buyer"
-        VENUE = "venue", "Venue"
-        ORGANIZER = "organizer", "Organizer"
+        ADMIN = "admin", "Admin"
+        USER = "user", "User"
 
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=255)
-    role = models.CharField(max_length=32, choices=Role.choices)
+    role = models.CharField(max_length=32, choices=Role.choices, default=Role.USER)
     image = models.ImageField(upload_to="avatars/", blank=True, null=True)
     phone = models.CharField(max_length=32, blank=True)
     google_sub = models.CharField(max_length=255, unique=True, null=True, blank=True)
@@ -28,7 +25,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     is_staff = models.BooleanField(default=False)
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["name", "role"]
+    REQUIRED_FIELDS = ["name"]
 
     objects = UserManager()
 
@@ -45,6 +42,10 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     @property
     def is_email_verified(self) -> bool:
         return self.email_verified_at is not None
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == self.Role.ADMIN or self.is_superuser
 
     def mark_email_verified(self) -> None:
         if self.email_verified_at is None:

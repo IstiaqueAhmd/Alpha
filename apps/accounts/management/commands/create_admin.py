@@ -12,12 +12,6 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--email", required=True)
         parser.add_argument("--name", required=True)
-        parser.add_argument(
-            "--role",
-            default=User.Role.ORGANIZER,
-            choices=[r for r, _ in User.Role.choices],
-            help="Account role (default: organizer).",
-        )
         parser.add_argument("--superuser", action="store_true")
         parser.add_argument(
             "--password",
@@ -36,7 +30,7 @@ class Command(BaseCommand):
 
         kwargs = {
             "name": options["name"],
-            "role": options["role"],
+            "role": User.Role.ADMIN,
             "is_staff": True,
             "is_active": True,
         }

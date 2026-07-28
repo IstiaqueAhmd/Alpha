@@ -7,7 +7,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/catalog/", include("apps.catalog.urls")),
-    path("api/v1/bookings/", include("apps.bookings.urls")),
+    # Unmounted: bookings app is currently unused; code/migrations left as-is.
+    # path("api/v1/bookings/", include("apps.bookings.urls")),
     path("api/v1/messaging/", include("apps.messaging.urls")),
     path("api/v1/teams/", include("apps.teams.urls")),
     path("api/v1/notifications/", include("apps.notifications.urls")),

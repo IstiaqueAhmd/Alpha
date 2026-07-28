@@ -10,9 +10,9 @@ INVITATION_TOKEN_BYTES = 32
 
 
 class ApprovalStatus(models.TextChoices):
-    """Superuser gate shared by teams and memberships.
+    """Admin gate shared by teams and memberships.
 
-    Nothing is active until a superuser approves it, so PENDING is the only
+    Nothing is active until an admin approves it, so PENDING is the only
     sensible default and every query that powers real behaviour must filter on
     APPROVED explicitly.
     """
@@ -130,8 +130,8 @@ class TeamInvitation(TimeStampedModel):
 
     The link is live as soon as it is created - the invitee can join right away.
     Joining does not make them an active member: acceptance creates a *pending*
-    membership that a superuser still has to approve, exactly like a direct add.
-    So the superuser gate lives on the resulting membership, not on the invite.
+    membership that an admin still has to approve, exactly like a direct add.
+    So the admin gate lives on the resulting membership, not on the invite.
     """
 
     class Status(models.TextChoices):

@@ -29,7 +29,6 @@ class ArtistProfile(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="artist_profile",
-        limit_choices_to={"role": "artist"},
     )
     bio = models.TextField(blank=True)
     location = models.CharField(max_length=255, blank=True)
@@ -61,7 +60,6 @@ class VenueProfile(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="venue_profile",
-        limit_choices_to={"role": "venue"},
     )
     description = models.TextField(blank=True)
     address = models.CharField(max_length=255, blank=True)

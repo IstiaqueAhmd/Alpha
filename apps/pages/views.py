@@ -1,20 +1,20 @@
 from rest_framework import status, viewsets
 from rest_framework.response import Response
 
+from apps.accounts.permissions import IsAdminOrReadOnly
 from .models import StaticPage
-from .permissions import IsSuperUserOrReadOnly
 from .serializers import StaticPageSerializer
 
 
 class StaticPageViewSet(viewsets.ModelViewSet):
     serializer_class = StaticPageSerializer
-    permission_classes = [IsSuperUserOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
     pagination_class = None
     lookup_field = "slug"
 
     def get_queryset(self):
         user = self.request.user
-        if user and user.is_authenticated and user.is_superuser:
+        if user and user.is_authenticated and user.is_admin:
             return StaticPage.objects.all()
         return StaticPage.objects.filter(is_published=True)
 

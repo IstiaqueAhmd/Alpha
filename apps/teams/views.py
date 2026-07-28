@@ -5,8 +5,9 @@ from rest_framework.response import Response
 
 from apps.common.pagination import StandardPagination
 
+from apps.accounts.permissions import IsAdmin
+
 from .models import Team
-from .permissions import IsSuperUser
 from .roles import TeamDomain, hierarchy
 from .serializers import (
     HierarchyRoleSerializer,
@@ -242,7 +243,7 @@ class MembershipReviewListView(GenericAPIView):
     browses reviewed history instead.
     """
 
-    permission_classes = [IsSuperUser]
+    permission_classes = [IsAdmin]
     serializer_class = TeamMembershipSerializer
     pagination_class = StandardPagination
 
@@ -256,7 +257,7 @@ class MembershipReviewListView(GenericAPIView):
 
 
 class MembershipReviewDetailView(GenericAPIView):
-    permission_classes = [IsSuperUser]
+    permission_classes = [IsAdmin]
     serializer_class = ReviewSerializer
 
     def get(self, request, membership_id: int):

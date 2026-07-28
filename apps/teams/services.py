@@ -25,7 +25,7 @@ class TeamService:
     """Team lifecycle and membership.
 
     Authorisation model: any approved member of a team may invite or add
-    people. That is intentionally permissive because a superuser approves every
+    people. That is intentionally permissive because an admin approves every
     team, every role assignment, and every invitation before it takes effect -
     the review gate is the control, not the caller's rank.
     """
@@ -388,9 +388,9 @@ class InvitationService:
 
 
 class ApprovalService:
-    """The superuser review gate.
+    """The admin review gate.
 
-    Nothing here checks permissions - the view enforces `IsSuperUser`. Keeping
+    Nothing here checks permissions - the view enforces `IsAdmin`. Keeping
     the check at the edge means these methods stay usable from a management
     command or the admin without a fake request user.
     """

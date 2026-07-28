@@ -47,7 +47,6 @@ class ArtistSearchTests(TestCase):
             email="alice@example.com",
             password="testpass123",
             name="Alice Internal",
-            role=User.Role.ARTIST,
         )
         cls.alice = ArtistProfile.objects.create(
             user=cls.alice_user, bio="Folk-rock", location="Brooklyn, NY", is_published=True,
@@ -71,7 +70,6 @@ class ArtistSearchTests(TestCase):
             email="bob@example.com",
             password="testpass123",
             name="Bob Internal",
-            role=User.Role.ARTIST,
         )
         cls.bob = ArtistProfile.objects.create(
             user=cls.bob_user, bio="Jazz sax", location="Brooklyn, NY", is_published=True,
@@ -373,7 +371,7 @@ class ArtistRadiusFilterTests(TestCase):
         # ---- Internal artists ----
         cls.nyc_user = User.objects.create_user(
             email="nyc@example.com", password="testpass123",
-            name="NYC Artist", role=User.Role.ARTIST,
+            name="NYC Artist",
         )
         cls.nyc_artist = ArtistProfile.objects.create(
             user=cls.nyc_user, is_published=True,
@@ -383,7 +381,7 @@ class ArtistRadiusFilterTests(TestCase):
 
         cls.chicago_user = User.objects.create_user(
             email="chi@example.com", password="testpass123",
-            name="Chicago Artist", role=User.Role.ARTIST,
+            name="Chicago Artist",
         )
         cls.chicago_artist = ArtistProfile.objects.create(
             user=cls.chicago_user, is_published=True,
@@ -393,7 +391,7 @@ class ArtistRadiusFilterTests(TestCase):
 
         cls.corner_user = User.objects.create_user(
             email="corner@example.com", password="testpass123",
-            name="BBox Corner Artist", role=User.Role.ARTIST,
+            name="BBox Corner Artist",
         )
         cls.corner_artist = ArtistProfile.objects.create(
             user=cls.corner_user, is_published=True,
@@ -402,7 +400,7 @@ class ArtistRadiusFilterTests(TestCase):
 
         cls.null_user = User.objects.create_user(
             email="null@example.com", password="testpass123",
-            name="No-Location Artist", role=User.Role.ARTIST,
+            name="No-Location Artist",
         )
         cls.null_artist = ArtistProfile.objects.create(
             user=cls.null_user, is_published=True,

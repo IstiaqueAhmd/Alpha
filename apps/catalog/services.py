@@ -163,15 +163,11 @@ class CatalogService:
 
     @staticmethod
     def get_or_create_own_artist_profile(user: User) -> ArtistProfile:
-        if user.role != User.Role.ARTIST:
-            raise PermissionDenied("Only artist accounts have an artist profile.")
         profile, _ = ArtistProfile.objects.get_or_create(user=user)
         return profile
 
     @staticmethod
     def get_or_create_own_venue_profile(user: User) -> VenueProfile:
-        if user.role != User.Role.VENUE:
-            raise PermissionDenied("Only venue accounts have a venue profile.")
         profile, _ = VenueProfile.objects.get_or_create(user=user)
         return profile
 
