@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.blog",
     "apps.pages",
+    "apps.inquiries",
     "drf_spectacular",
 ]
 
