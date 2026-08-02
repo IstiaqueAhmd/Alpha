@@ -1,3 +1,7 @@
 from django.contrib import admin
 
-# Register your models here.
+from .models import Offer, OfferDocument, OfferSignature
+
+admin.site.register(Offer)
+admin.site.register(OfferSignature)
+admin.site.register(OfferDocument)

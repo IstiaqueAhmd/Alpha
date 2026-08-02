@@ -1,3 +1,136 @@
-from django.shortcuts import render
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
+from rest_framework import generics, status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
-# Create your views here.
+from apps.common.pagination import StandardPagination
+
+from .models import Offer
+from .serializers import (
+    OfferCreateSerializer,
+    OfferSerializer,
+    OfferShareSerializer,
+    OfferSignSerializer,
+    OfferUpdateSerializer,
+)
+from .services import OfferService
+
+
+@extend_schema_view(
+    get=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "status",
+                str,
+                enum=[choice[0] for choice in Offer.Status.choices],
+                required=False,
+                description="Filter by offer status.",
+            ),
+        ],
+        responses=OfferSerializer,
+    ),
+    post=extend_schema(request=OfferCreateSerializer, responses=OfferSerializer),
+)
+class OfferListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        qs = OfferService.list_for(self.request.user)
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
+    def get_serializer_class(self):
+        return OfferCreateSerializer if self.request.method == "POST" else OfferSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        inquiry_id = data.pop("inquiry_id")
+        offer = OfferService.create_from_inquiry(sender=request.user, inquiry_id=inquiry_id, **data)
+        return Response(
+            {"success": True, "offer": OfferSerializer(offer).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema_view(
+    patch=extend_schema(request=OfferUpdateSerializer, responses=OfferSerializer),
+)
+class OfferDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return OfferService.get_for_viewer(self.request.user, self.kwargs["offer_id"])
+
+    def get_serializer_class(self):
+        return OfferUpdateSerializer if self.request.method == "PATCH" else OfferSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        offer = self.get_object()
+        return Response({"success": True, "offer": OfferSerializer(offer).data})
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        offer = OfferService.update(
+            actor=request.user,
+            offer_id=self.kwargs["offer_id"],
+            **serializer.validated_data,
+        )
+        return Response({"success": True, "offer": OfferSerializer(offer).data})
+
+
+class OfferAcceptView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OfferSerializer
+
+    def post(self, request, offer_id: int):
+        offer = OfferService.respond(viewer=request.user, offer_id=offer_id, decision=Offer.Status.ACCEPTED)
+        return Response({"success": True, "offer": OfferSerializer(offer).data})
+
+
+class OfferRejectView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OfferSerializer
+
+    def post(self, request, offer_id: int):
+        offer = OfferService.respond(viewer=request.user, offer_id=offer_id, decision=Offer.Status.REJECTED)
+        return Response({"success": True, "offer": OfferSerializer(offer).data})
+
+
+class OfferShareView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OfferShareSerializer
+
+    def post(self, request, offer_id: int):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        offer = OfferService.share(
+            actor=request.user,
+            offer_id=offer_id,
+            user_ids=serializer.validated_data.get("user_ids", []),
+            team_ids=serializer.validated_data.get("team_ids", []),
+        )
+        return Response({"success": True, "offer": OfferSerializer(offer).data})
+
+
+class OfferSignView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OfferSignSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, offer_id: int):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        OfferService.add_signature(
+            actor=request.user,
+            offer_id=offer_id,
+            signature=serializer.validated_data["signature"],
+        )
+        offer = OfferService.get_for_viewer(request.user, offer_id)
+        return Response({"success": True, "offer": OfferSerializer(offer).data}, status=status.HTTP_201_CREATED)

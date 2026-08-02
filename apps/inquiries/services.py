@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db.models import Q, QuerySet
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+
 from apps.notifications.services import NotificationService
 
 from .models import Inquiry
@@ -38,4 +40,37 @@ class InquiryService:
                 data={"inquiry_id": inquiry.id, "inquiry_uid": inquiry.uid},
             )
 
+        return inquiry
+
+    @staticmethod
+    def get_for_viewer(viewer: User, inquiry_id: int) -> Inquiry:
+        inquiry = (
+            Inquiry.objects
+            .select_related("sender", "receiver")
+            .filter(pk=inquiry_id)
+            .filter(Q(sender=viewer) | Q(receiver=viewer))
+            .first()
+        )
+        if not inquiry:
+            raise NotFound("Inquiry not found.")
+        return inquiry
+
+    @classmethod
+    def respond(cls, *, viewer: User, inquiry_id: int, decision: str) -> Inquiry:
+        inquiry = cls.get_for_viewer(viewer, inquiry_id)
+        if inquiry.receiver_id != viewer.pk:
+            raise PermissionDenied("Only the receiver can respond to this inquiry.")
+        if inquiry.status != Inquiry.Status.PENDING:
+            raise ValidationError("This inquiry has already been responded to.")
+
+        inquiry.status = decision
+        inquiry.save(update_fields=["status", "updated_at"])
+
+        NotificationService.notify(
+            recipient=inquiry.sender,
+            notification_type=f"inquiry.{decision}",
+            title=f"Your inquiry was {decision}",
+            message=inquiry.event_title,
+            data={"inquiry_id": inquiry.id, "inquiry_uid": inquiry.uid},
+        )
         return inquiry

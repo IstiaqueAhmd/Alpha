@@ -1,6 +1,54 @@
+import uuid
+
+from django.conf import settings
 from django.db import models
 
-class Offer(models.Model):
+from apps.common.models import TimeStampedModel
+from apps.inquiries.models import Inquiry
+
+
+def generate_uid() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+class Offer(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
+
+    uid = models.CharField(max_length=12, default=generate_uid, unique=True, editable=False, db_index=True)
+
+    inquiry = models.OneToOneField(
+        Inquiry,
+        on_delete=models.CASCADE,
+        related_name="offer",
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_deal_offers",
+    )
+    receiver = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="received_deal_offers",
+    )
+
+    shared_with_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="shared_offers",
+        blank=True,
+    )
+    shared_with_teams = models.ManyToManyField(
+        "teams.Team",
+        related_name="shared_offers",
+        blank=True,
+    )
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
     artist_name = models.CharField(max_length=128)
     date = models.DateField()
     venue = models.CharField(max_length=128)
@@ -28,13 +76,46 @@ class Offer(models.Model):
 
     additional_notes = models.TextField(null=True, blank=True)
 
-    signature = models.ImageField(upload_to='offer_signatures/', null=True, blank=True)
+    class Meta:
+        db_table = "offers"
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["sender", "-created_at"]),
+            models.Index(fields=["receiver", "-created_at"]),
+            models.Index(fields=["receiver", "status", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Offer<{self.uid}>"
 
 
-class OfferDocument(models.Model):
-    offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name='documents')
-    document = models.FileField(upload_to='offer_documents/')
-    uploaded_at = models.DateTimeField(auto_now_add=True)
+class OfferSignature(TimeStampedModel):
+    offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name="signatures")
+    signer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="offer_signatures",
+    )
+    signature = models.ImageField(upload_to="offers/signatures/")
+    signed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "offer_signatures"
+        ordering = ("signed_at",)
+        constraints = [
+            models.UniqueConstraint(fields=["offer", "signer"], name="uniq_offer_signer"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Signature<{self.signer_id}> on {self.offer_id}"
 
 
+class OfferDocument(TimeStampedModel):
+    offer = models.ForeignKey(Offer, on_delete=models.CASCADE, related_name="documents")
+    document = models.FileField(upload_to="offers/documents/")
 
+    class Meta:
+        db_table = "offer_documents"
+
+    def __str__(self) -> str:
+        return f"Document<{self.pk}> on {self.offer_id}"

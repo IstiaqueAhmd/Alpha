@@ -43,3 +43,33 @@ class InquiryListCreateView(generics.ListCreateAPIView):
             {"success": True, "inquiry": InquirySerializer(inquiry).data},
             status=status.HTTP_201_CREATED,
         )
+
+
+class InquiryDetailView(generics.RetrieveAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = InquirySerializer
+
+    def get_object(self):
+        return InquiryService.get_for_viewer(self.request.user, self.kwargs["inquiry_id"])
+
+    def retrieve(self, request, *args, **kwargs):
+        inquiry = self.get_object()
+        return Response({"success": True, "inquiry": InquirySerializer(inquiry).data})
+
+
+class InquiryAcceptView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = InquirySerializer
+
+    def post(self, request, inquiry_id: int):
+        inquiry = InquiryService.respond(viewer=request.user, inquiry_id=inquiry_id, decision=Inquiry.Status.ACCEPTED)
+        return Response({"success": True, "inquiry": InquirySerializer(inquiry).data})
+
+
+class InquiryDeclineView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = InquirySerializer
+
+    def post(self, request, inquiry_id: int):
+        inquiry = InquiryService.respond(viewer=request.user, inquiry_id=inquiry_id, decision=Inquiry.Status.DECLINED)
+        return Response({"success": True, "inquiry": InquirySerializer(inquiry).data})
