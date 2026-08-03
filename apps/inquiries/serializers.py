@@ -18,6 +18,7 @@ class InquirySerializer(serializers.ModelSerializer):
             "receiver",
             "receiver_email",
             "event_title",
+            "venue_name",
             "start_date_time",
             "expected_attendance",
             "budget",
@@ -37,6 +38,7 @@ class InquiryCreateSerializer(serializers.ModelSerializer):
         fields = (
             "receiver_email",
             "event_title",
+            "venue_name",
             "start_date_time",
             "expected_attendance",
             "budget",
