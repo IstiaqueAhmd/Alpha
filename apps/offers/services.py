@@ -1,14 +1,14 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
-
 from apps.inquiries.models import Inquiry
 from apps.notifications.services import NotificationService
 from apps.teams.models import ApprovalStatus, TeamMembership
 from apps.teams.services import TeamService
 
-from .models import Offer, OfferSignature
+from .models import Offer, OfferDocument, OfferSignature
 
 User = get_user_model()
 
@@ -39,24 +39,63 @@ class OfferService:
             raise NotFound("Offer not found.")
         return offer
 
-    @staticmethod
-    def create_from_inquiry(*, sender: User, inquiry_id: int, **fields) -> Offer:
-        inquiry = Inquiry.objects.filter(pk=inquiry_id).first()
-        if not inquiry:
-            raise NotFound("Inquiry not found.")
-        if inquiry.receiver_id != sender.pk:
-            raise PermissionDenied("Only the inquiry receiver can generate an offer for it.")
-        if inquiry.status != Inquiry.Status.ACCEPTED:
-            raise ValidationError("The inquiry must be accepted before an offer can be generated.")
-        if Offer.objects.filter(inquiry=inquiry).exists():
-            raise ValidationError("An offer already exists for this inquiry.")
+    @classmethod
+    @transaction.atomic
+    def create(
+        cls,
+        *,
+        sender: User,
+        inquiry_id: int | None = None,
+        receiver_id: int | None = None,
+        signature=None,
+        files: list | None = None,
+        **fields,
+    ) -> Offer:
+        """Create an offer either against an accepted inquiry, or standalone to a receiver.
+
+        Offers don't require an inquiry - `inquiry_id` is optional. When given, it still
+        enforces the original rule (sender must be that inquiry's receiver, inquiry must be
+        accepted, one offer per inquiry) and derives the receiver from it. Without it, the
+        caller must name a `receiver_id` directly.
+
+        `signature`/`files` are optional day-one attachments: only the sender is present at
+        creation time, so only *their* signature can be bundled here - the receiver's (and
+        any later re-signs, edits, or additional documents) still go through the dedicated
+        sign/documents endpoints, since those happen later and by a different actor.
+        """
+        inquiry = None
+        if inquiry_id is not None:
+            inquiry = Inquiry.objects.filter(pk=inquiry_id).first()
+            if not inquiry:
+                raise NotFound("Inquiry not found.")
+            if inquiry.receiver_id != sender.pk:
+                raise PermissionDenied("Only the inquiry receiver can generate an offer for it.")
+            if inquiry.status != Inquiry.Status.ACCEPTED:
+                raise ValidationError("The inquiry must be accepted before an offer can be generated.")
+            if Offer.objects.filter(inquiry=inquiry).exists():
+                raise ValidationError("An offer already exists for this inquiry.")
+            receiver = inquiry.sender
+        else:
+            if not receiver_id:
+                raise ValidationError("Provide either inquiry_id or receiver_id.")
+            receiver = User.objects.filter(pk=receiver_id, is_active=True).first()
+            if not receiver:
+                raise NotFound("Receiver not found.")
+            if receiver.pk == sender.pk:
+                raise ValidationError("Cannot send an offer to yourself.")
 
         offer = Offer.objects.create(
             inquiry=inquiry,
             sender=sender,
-            receiver=inquiry.sender,
+            receiver=receiver,
             **fields,
         )
+
+        if signature is not None:
+            OfferSignature.objects.create(offer=offer, signer=sender, signature=signature)
+
+        if files:
+            OfferDocument.objects.bulk_create([OfferDocument(offer=offer, document=f) for f in files])
 
         NotificationService.notify(
             recipient=offer.receiver,
@@ -134,9 +173,10 @@ class OfferService:
 
     @classmethod
     def add_signature(cls, *, actor: User, offer_id: int, signature) -> OfferSignature:
+        # get_for_viewer already raises NotFound unless actor is the sender, the receiver,
+        # a directly shared user, or an approved member of a shared team - anyone who
+        # clears that is allowed to sign.
         offer = cls.get_for_viewer(actor, offer_id)
-        if actor.pk not in (offer.sender_id, offer.receiver_id):
-            raise PermissionDenied("Only the offer's sender or receiver can sign it.")
 
         obj, _ = OfferSignature.objects.update_or_create(
             offer=offer,
@@ -144,3 +184,10 @@ class OfferService:
             defaults={"signature": signature, "signed_at": timezone.now()},
         )
         return obj
+
+    @classmethod
+    def add_documents(cls, *, actor: User, offer_id: int, files: list) -> list[OfferDocument]:
+        offer = cls.get_for_viewer(actor, offer_id)
+        return OfferDocument.objects.bulk_create(
+            [OfferDocument(offer=offer, document=file) for file in files]
+        )

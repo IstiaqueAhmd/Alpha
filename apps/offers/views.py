@@ -9,6 +9,7 @@ from apps.common.pagination import StandardPagination
 from .models import Offer
 from .serializers import (
     OfferCreateSerializer,
+    OfferDocumentUploadSerializer,
     OfferSerializer,
     OfferShareSerializer,
     OfferSignSerializer,
@@ -35,6 +36,7 @@ from .services import OfferService
 class OfferListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardPagination
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         qs = OfferService.list_for(self.request.user)
@@ -50,8 +52,11 @@ class OfferListCreateView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
-        inquiry_id = data.pop("inquiry_id")
-        offer = OfferService.create_from_inquiry(sender=request.user, inquiry_id=inquiry_id, **data)
+        inquiry_id = data.pop("inquiry_id", None)
+        receiver_id = data.pop("receiver_id", None)
+        offer = OfferService.create(
+            sender=request.user, inquiry_id=inquiry_id, receiver_id=receiver_id, **data
+        )
         return Response(
             {"success": True, "offer": OfferSerializer(offer).data},
             status=status.HTTP_201_CREATED,
@@ -131,6 +136,23 @@ class OfferSignView(generics.GenericAPIView):
             actor=request.user,
             offer_id=offer_id,
             signature=serializer.validated_data["signature"],
+        )
+        offer = OfferService.get_for_viewer(request.user, offer_id)
+        return Response({"success": True, "offer": OfferSerializer(offer).data}, status=status.HTTP_201_CREATED)
+
+
+class OfferDocumentUploadView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OfferDocumentUploadSerializer
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def post(self, request, offer_id: int):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        OfferService.add_documents(
+            actor=request.user,
+            offer_id=offer_id,
+            files=serializer.validated_data["files"],
         )
         offer = OfferService.get_for_viewer(request.user, offer_id)
         return Response({"success": True, "offer": OfferSerializer(offer).data}, status=status.HTTP_201_CREATED)

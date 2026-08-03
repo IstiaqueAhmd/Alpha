@@ -11,7 +11,7 @@ User = get_user_model()
 
 class InquiryService:
     @staticmethod
-    def list_for(user: User, *, status: str | None = None) -> QuerySet[Inquiry]:
+    def list_for(user: User, *, status: str | None = None, email: str | None = None) -> QuerySet[Inquiry]:
         qs = (
             Inquiry.objects
             .select_related("sender", "receiver")
@@ -19,6 +19,13 @@ class InquiryService:
         )
         if status:
             qs = qs.filter(status=status)
+        if email:
+            qs = qs.filter(
+                Q(receiver_email__icontains=email)
+                | Q(email__icontains=email)
+                | Q(sender__email__icontains=email)
+                | Q(receiver__email__icontains=email)
+            ).distinct()
         return qs
 
     @staticmethod

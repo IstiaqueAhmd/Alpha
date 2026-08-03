@@ -1,8 +1,6 @@
 import uuid
-
 from django.conf import settings
 from django.db import models
-
 from apps.common.models import TimeStampedModel
 from apps.inquiries.models import Inquiry
 
@@ -21,7 +19,9 @@ class Offer(TimeStampedModel):
 
     inquiry = models.OneToOneField(
         Inquiry,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="offer",
     )
     sender = models.ForeignKey(
@@ -57,6 +57,13 @@ class Offer(TimeStampedModel):
     venue_phone = models.CharField(max_length=32)
 
     offer_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    airfare = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    backline = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    hotel_ground_transportation = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    catering = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    first_class_sound_and_lighting = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    door_time = models.TimeField()
     expected_attendance = models.IntegerField()
     past_performers = models.CharField(max_length=256, null=True, blank=True)
     social_media_request = models.CharField(max_length=256, null=True, blank=True)

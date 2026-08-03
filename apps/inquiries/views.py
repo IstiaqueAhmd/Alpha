@@ -20,6 +20,12 @@ from .services import InquiryService
                 required=False,
                 description="Filter by inquiry status.",
             ),
+            OpenApiParameter(
+                "email",
+                str,
+                required=False,
+                description="Search by email (receiver_email, contact email, or either party's account email).",
+            ),
         ],
         responses=InquirySerializer,
     ),
@@ -30,7 +36,11 @@ class InquiryListCreateView(generics.ListCreateAPIView):
     pagination_class = StandardPagination
 
     def get_queryset(self):
-        return InquiryService.list_for(self.request.user, status=self.request.query_params.get("status"))
+        return InquiryService.list_for(
+            self.request.user,
+            status=self.request.query_params.get("status"),
+            email=self.request.query_params.get("email"),
+        )
 
     def get_serializer_class(self):
         return InquiryCreateSerializer if self.request.method == "POST" else InquirySerializer

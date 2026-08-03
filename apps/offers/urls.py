@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     OfferAcceptView,
     OfferDetailView,
+    OfferDocumentUploadView,
     OfferListCreateView,
     OfferRejectView,
     OfferShareView,
@@ -18,4 +19,5 @@ urlpatterns = [
     path("<int:offer_id>/reject/", OfferRejectView.as_view(), name="offer-reject"),
     path("<int:offer_id>/share/", OfferShareView.as_view(), name="offer-share"),
     path("<int:offer_id>/sign/", OfferSignView.as_view(), name="offer-sign"),
+    path("<int:offer_id>/documents/", OfferDocumentUploadView.as_view(), name="offer-documents"),
 ]
