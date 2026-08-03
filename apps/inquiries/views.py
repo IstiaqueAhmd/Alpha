@@ -24,7 +24,7 @@ from .services import InquiryService
                 "email",
                 str,
                 required=False,
-                description="Search by email (receiver_email, contact email, or either party's account email).",
+                description="Search by either party's account email (sender or receiver).",
             ),
         ],
         responses=InquirySerializer,

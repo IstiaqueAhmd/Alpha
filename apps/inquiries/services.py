@@ -21,10 +21,7 @@ class InquiryService:
             qs = qs.filter(status=status)
         if email:
             qs = qs.filter(
-                Q(receiver_email__icontains=email)
-                | Q(email__icontains=email)
-                | Q(sender__email__icontains=email)
-                | Q(receiver__email__icontains=email)
+                Q(sender__email__icontains=email) | Q(receiver__email__icontains=email)
             ).distinct()
         return qs
 
