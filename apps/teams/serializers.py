@@ -13,6 +13,7 @@ class TeamUserSerializer(serializers.Serializer):
 
 class TeamSerializer(serializers.ModelSerializer):
     created_by = TeamUserSerializer(read_only=True)
+    my_membership = serializers.SerializerMethodField()
 
     class Meta:
         model = Team
@@ -22,11 +23,37 @@ class TeamSerializer(serializers.ModelSerializer):
             "name",
             "status",
             "created_by",
+            "my_membership",
             "approved_at",
             "review_note",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_my_membership(self, obj: Team) -> dict | None:
+        """The caller's own membership on this team - role, domain-relative rank, and
+        approval status - so the frontend can pick a dashboard on team switch without a
+        second request. None if the caller was never a member (or the request has no
+        authenticated user, e.g. schema generation).
+        """
+        request = self.context.get("request")
+        if not request or not getattr(request.user, "is_authenticated", False):
+            return None
+
+        membership = (
+            TeamMembership.objects.filter(team=obj, user=request.user)
+            .order_by("-created_at")
+            .first()
+        )
+        if not membership:
+            return None
+
+        return {
+            "role": membership.role,
+            "role_label": membership.get_role_display(),
+            "rank": rank_of(obj.domain, membership.role),
+            "status": membership.status,
+        }
 
 
 class TeamCreateSerializer(serializers.Serializer):

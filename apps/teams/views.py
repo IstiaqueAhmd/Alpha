@@ -57,7 +57,9 @@ class TeamListCreateView(GenericAPIView):
         qs = TeamService.list_for(request.user, search=request.query_params.get("search"))
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(TeamSerializer(page, many=True).data)
+        return paginator.get_paginated_response(
+            TeamSerializer(page, many=True, context={"request": request}).data
+        )
 
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
@@ -72,7 +74,7 @@ class TeamListCreateView(GenericAPIView):
             {
                 "success": True,
                 "message": "Team created. Your membership is awaiting approval.",
-                "team": TeamSerializer(team).data,
+                "team": TeamSerializer(team, context={"request": request}).data,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -119,7 +121,9 @@ class PublicTeamSearchView(GenericAPIView):
         qs = TeamService.search_public_teams(search=request.query_params.get("search"))
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(TeamSerializer(page, many=True).data)
+        return paginator.get_paginated_response(
+            TeamSerializer(page, many=True, context={"request": request}).data
+        )
 
 
 class TeamDetailView(GenericAPIView):
@@ -129,7 +133,7 @@ class TeamDetailView(GenericAPIView):
     def get(self, request, team_id: int):
         team = TeamService.get_for_member(request.user, team_id)
         return Response(
-            {"success": True, "team": TeamSerializer(team).data},
+            {"success": True, "team": TeamSerializer(team, context={"request": request}).data},
             status=status.HTTP_200_OK,
         )
 
