@@ -26,7 +26,25 @@ from .services import OfferService
                 str,
                 enum=[choice[0] for choice in Offer.Status.choices],
                 required=False,
-                description="Filter by offer status.",
+                description="Filter by offer status (e.g. status=rejected).",
+            ),
+            OpenApiParameter(
+                "date_from",
+                str,
+                required=False,
+                description="Event date lower bound, YYYY-MM-DD.",
+            ),
+            OpenApiParameter(
+                "date_to",
+                str,
+                required=False,
+                description="Event date upper bound, YYYY-MM-DD.",
+            ),
+            OpenApiParameter(
+                "shared_with_me",
+                bool,
+                required=False,
+                description="Only offers shared with me (directly or via a team) - excludes my own sent/received offers.",
             ),
         ],
         responses=OfferSerializer,
@@ -39,11 +57,14 @@ class OfferListCreateView(generics.ListCreateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        qs = OfferService.list_for(self.request.user)
-        status_param = self.request.query_params.get("status")
-        if status_param:
-            qs = qs.filter(status=status_param)
-        return qs
+        params = self.request.query_params
+        return OfferService.list_for(
+            self.request.user,
+            status=params.get("status"),
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+            shared_with_me=params.get("shared_with_me", "").lower() == "true",
+        )
 
     def get_serializer_class(self):
         return OfferCreateSerializer if self.request.method == "POST" else OfferSerializer
@@ -116,6 +137,22 @@ class OfferShareView(generics.GenericAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         offer = OfferService.share(
+            actor=request.user,
+            offer_id=offer_id,
+            user_ids=serializer.validated_data.get("user_ids", []),
+            team_ids=serializer.validated_data.get("team_ids", []),
+        )
+        return Response({"success": True, "offer": OfferSerializer(offer).data})
+
+
+class OfferUnshareView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = OfferShareSerializer
+
+    def post(self, request, offer_id: int):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        offer = OfferService.unshare(
             actor=request.user,
             offer_id=offer_id,
             user_ids=serializer.validated_data.get("user_ids", []),

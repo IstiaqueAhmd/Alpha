@@ -2,10 +2,11 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from apps.inquiries.models import Inquiry
 from apps.notifications.services import NotificationService
-from apps.teams.models import ApprovalStatus, TeamMembership
+from apps.teams.models import ApprovalStatus, Team, TeamMembership
 from apps.teams.services import TeamService
 
 from .models import Offer, OfferDocument, OfferSignature
@@ -15,22 +16,54 @@ User = get_user_model()
 
 class OfferService:
     @staticmethod
-    def list_for(user: User) -> QuerySet[Offer]:
+    def list_for(
+        user: User,
+        *,
+        status: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        shared_with_me: bool = False,
+    ) -> QuerySet[Offer]:
         member_team_ids = TeamMembership.objects.filter(
             user=user, status=ApprovalStatus.APPROVED
         ).values_list("team_id", flat=True)
-        return (
-            Offer.objects
-            .select_related("sender", "receiver", "inquiry")
-            .prefetch_related("shared_with_users", "shared_with_teams", "signatures")
-            .filter(
+
+        # shared_with_me narrows the scope to *only* the M2M shares - deliberately excluding
+        # sender/receiver, so "shared with me" doesn't just re-list your own offers.
+        if shared_with_me:
+            scope = Q(shared_with_users=user) | Q(shared_with_teams__in=member_team_ids)
+        else:
+            scope = (
                 Q(sender=user)
                 | Q(receiver=user)
                 | Q(shared_with_users=user)
                 | Q(shared_with_teams__in=member_team_ids)
             )
+
+        qs = (
+            Offer.objects
+            .select_related("sender", "receiver", "inquiry")
+            .prefetch_related("shared_with_users", "shared_with_teams", "signatures")
+            .filter(scope)
             .distinct()
         )
+
+        if status:
+            qs = qs.filter(status=status)
+
+        if date_from:
+            parsed = parse_date(date_from)
+            if not parsed:
+                raise ValidationError("date_from must be in YYYY-MM-DD format.")
+            qs = qs.filter(date__gte=parsed)
+
+        if date_to:
+            parsed = parse_date(date_to)
+            if not parsed:
+                raise ValidationError("date_to must be in YYYY-MM-DD format.")
+            qs = qs.filter(date__lte=parsed)
+
+        return qs
 
     @staticmethod
     def get_for_viewer(viewer: User, offer_id: int) -> Offer:
@@ -38,6 +71,18 @@ class OfferService:
         if not offer:
             raise NotFound("Offer not found.")
         return offer
+
+    @staticmethod
+    def _apply_share(*, offer: Offer, actor: User, user_ids: list[int], team_ids: list[int]) -> None:
+        if user_ids:
+            users = User.objects.filter(pk__in=user_ids, is_active=True)
+            offer.shared_with_users.add(*users)
+
+        for team_id in team_ids:
+            # get_for_member raises unless `actor` is that team's founder or an approved
+            # member - you can only share into teams you actually belong to.
+            team = TeamService.get_for_member(actor, team_id)
+            offer.shared_with_teams.add(team)
 
     @classmethod
     @transaction.atomic
@@ -49,6 +94,8 @@ class OfferService:
         receiver_id: int | None = None,
         signature=None,
         files: list | None = None,
+        user_ids: list[int] | None = None,
+        team_ids: list[int] | None = None,
         **fields,
     ) -> Offer:
         """Create an offer either against an accepted inquiry, or standalone to a receiver.
@@ -62,6 +109,9 @@ class OfferService:
         creation time, so only *their* signature can be bundled here - the receiver's (and
         any later re-signs, edits, or additional documents) still go through the dedicated
         sign/documents endpoints, since those happen later and by a different actor.
+
+        `user_ids`/`team_ids` are optional initial shares - equivalent to calling `share()`
+        right after creation, just folded into the same transaction.
         """
         inquiry = None
         if inquiry_id is not None:
@@ -97,6 +147,9 @@ class OfferService:
         if files:
             OfferDocument.objects.bulk_create([OfferDocument(offer=offer, document=f) for f in files])
 
+        if user_ids or team_ids:
+            cls._apply_share(offer=offer, actor=sender, user_ids=user_ids or [], team_ids=team_ids or [])
+
         NotificationService.notify(
             recipient=offer.receiver,
             notification_type="offer.received",
@@ -128,7 +181,15 @@ class OfferService:
         return offer
 
     @classmethod
-    def update(cls, *, actor: User, offer_id: int, **fields) -> Offer:
+    def update(
+        cls,
+        *,
+        actor: User,
+        offer_id: int,
+        user_ids: list[int] | None = None,
+        team_ids: list[int] | None = None,
+        **fields,
+    ) -> Offer:
         offer = cls.get_for_viewer(actor, offer_id)
         if offer.sender_id != actor.pk:
             raise PermissionDenied("Only the offer sender can edit it.")
@@ -146,6 +207,10 @@ class OfferService:
 
         offer.signatures.all().delete()
 
+        # Additive only - edit never removes an existing share, that's what unshare() is for.
+        if user_ids or team_ids:
+            cls._apply_share(offer=offer, actor=actor, user_ids=user_ids or [], team_ids=team_ids or [])
+
         NotificationService.notify(
             recipient=offer.receiver,
             notification_type="offer.updated",
@@ -161,13 +226,19 @@ class OfferService:
         if offer.sender_id != actor.pk:
             raise PermissionDenied("Only the offer sender can share it.")
 
-        if user_ids:
-            users = User.objects.filter(pk__in=user_ids, is_active=True)
-            offer.shared_with_users.add(*users)
+        cls._apply_share(offer=offer, actor=actor, user_ids=user_ids, team_ids=team_ids)
+        return offer
 
-        for team_id in team_ids:
-            team = TeamService.get_for_member(actor, team_id)
-            offer.shared_with_teams.add(team)
+    @classmethod
+    def unshare(cls, *, actor: User, offer_id: int, user_ids: list[int], team_ids: list[int]) -> Offer:
+        offer = cls.get_for_viewer(actor, offer_id)
+        if offer.sender_id != actor.pk:
+            raise PermissionDenied("Only the offer sender can remove shared access.")
+
+        if user_ids:
+            offer.shared_with_users.remove(*User.objects.filter(pk__in=user_ids))
+        if team_ids:
+            offer.shared_with_teams.remove(*Team.objects.filter(pk__in=team_ids))
 
         return offer
 

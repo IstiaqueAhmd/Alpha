@@ -81,6 +81,8 @@ class Offer(TimeStampedModel):
     contact_production_name = models.CharField(max_length=128)
     contact_production_contact_info = models.CharField(max_length=32)
 
+    included_facilities = models.JSONField(default=list, blank=True)
+
     additional_notes = models.TextField(null=True, blank=True)
 
     class Meta:
@@ -90,6 +92,7 @@ class Offer(TimeStampedModel):
             models.Index(fields=["sender", "-created_at"]),
             models.Index(fields=["receiver", "-created_at"]),
             models.Index(fields=["receiver", "status", "-created_at"]),
+            models.Index(fields=["date"]),
         ]
 
     def __str__(self) -> str:

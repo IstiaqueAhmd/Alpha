@@ -102,10 +102,12 @@ class OfferCreateSerializer(serializers.ModelSerializer):
         allow_empty=True,
         max_length=10,
     )
+    user_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
 
     class Meta:
         model = Offer
-        fields = ("inquiry_id", "receiver_id", "signature", "files", *CONTRACT_FIELDS)
+        fields = ("inquiry_id", "receiver_id", "signature", "files", "user_ids", "team_ids", *CONTRACT_FIELDS)
 
     def validate(self, attrs):
         if not attrs.get("inquiry_id") and not attrs.get("receiver_id"):
@@ -116,10 +118,13 @@ class OfferCreateSerializer(serializers.ModelSerializer):
 
 
 class OfferUpdateSerializer(serializers.ModelSerializer):
+    user_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+    team_ids = serializers.ListField(child=serializers.IntegerField(), required=False, allow_empty=True)
+
     class Meta:
         model = Offer
-        fields = CONTRACT_FIELDS
-        extra_kwargs = {field: {"required": False} for field in fields}
+        fields = (*CONTRACT_FIELDS, "user_ids", "team_ids")
+        extra_kwargs = {field: {"required": False} for field in CONTRACT_FIELDS}
 
 
 class OfferShareSerializer(serializers.Serializer):
