@@ -23,6 +23,7 @@ class OfferService:
         date_from: str | None = None,
         date_to: str | None = None,
         shared_with_me: bool = False,
+        email: str | None = None,
     ) -> QuerySet[Offer]:
         member_team_ids = TeamMembership.objects.filter(
             user=user, status=ApprovalStatus.APPROVED
@@ -62,6 +63,13 @@ class OfferService:
             if not parsed:
                 raise ValidationError("date_to must be in YYYY-MM-DD format.")
             qs = qs.filter(date__lte=parsed)
+
+        if email:
+            # Only the indexed accounts.User.email (sender/receiver's actual account) - same
+            # rule as inquiries' email search.
+            qs = qs.filter(
+                Q(sender__email__icontains=email) | Q(receiver__email__icontains=email)
+            ).distinct()
 
         return qs
 

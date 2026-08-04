@@ -21,6 +21,7 @@ from .serializers import (
     TeamInvitationTokenSerializer,
     TeamMembershipSerializer,
     TeamSerializer,
+    TeamUserSerializer,
 )
 from .services import ApprovalService, InvitationService, TeamService
 
@@ -75,6 +76,50 @@ class TeamListCreateView(GenericAPIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class RelatedUserSearchView(GenericAPIView):
+    """Search users who share at least one approved team with the caller -
+    e.g. picking a teammate to share something with, across any of my teams.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = TeamUserSerializer
+    pagination_class = StandardPagination
+
+    def get(self, request):
+        qs = TeamService.search_related_users(request.user, email=request.query_params.get("email"))
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(TeamUserSerializer(page, many=True).data)
+
+
+class PublicUserSearchView(GenericAPIView):
+    """Platform-wide user search, not scoped to a shared team."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = TeamUserSerializer
+    pagination_class = StandardPagination
+
+    def get(self, request):
+        qs = TeamService.search_all_users(email=request.query_params.get("email"))
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(TeamUserSerializer(page, many=True).data)
+
+
+class PublicTeamSearchView(GenericAPIView):
+    """Platform-wide team search, not scoped to membership - approved teams only."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = TeamSerializer
+    pagination_class = StandardPagination
+
+    def get(self, request):
+        qs = TeamService.search_public_teams(search=request.query_params.get("search"))
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request, view=self)
+        return paginator.get_paginated_response(TeamSerializer(page, many=True).data)
 
 
 class TeamDetailView(GenericAPIView):

@@ -32,6 +32,7 @@ CONTRACT_FIELDS = (
     "contact_buyer_contact_info",
     "contact_production_name",
     "contact_production_contact_info",
+    "included_facilities",
     "additional_notes",
 )
 

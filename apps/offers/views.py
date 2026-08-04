@@ -46,6 +46,12 @@ from .services import OfferService
                 required=False,
                 description="Only offers shared with me (directly or via a team) - excludes my own sent/received offers.",
             ),
+            OpenApiParameter(
+                "email",
+                str,
+                required=False,
+                description="Search by either party's account email (sender or receiver).",
+            ),
         ],
         responses=OfferSerializer,
     ),
@@ -64,6 +70,7 @@ class OfferListCreateView(generics.ListCreateAPIView):
             date_from=params.get("date_from"),
             date_to=params.get("date_to"),
             shared_with_me=params.get("shared_with_me", "").lower() == "true",
+            email=params.get("email"),
         )
 
     def get_serializer_class(self):

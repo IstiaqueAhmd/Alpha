@@ -88,6 +88,47 @@ class TeamService:
         return qs
 
     @staticmethod
+    def search_related_users(user, email: str | None = None) -> QuerySet[User]:
+        """Users who share at least one approved team with `user` - i.e. teammates
+        across every team `user` belongs to, regardless of which team. Excludes
+        `user` themselves. `email` filters case-insensitively, substring.
+        """
+        my_team_ids = TeamMembership.objects.filter(
+            user=user, status=ApprovalStatus.APPROVED
+        ).values_list("team_id", flat=True)
+        qs = (
+            User.objects.filter(
+                team_memberships__team_id__in=my_team_ids,
+                team_memberships__status=ApprovalStatus.APPROVED,
+                is_active=True,
+            )
+            .exclude(pk=user.pk)
+            .distinct()
+            .order_by("name")
+        )
+        if email:
+            qs = qs.filter(email__icontains=email)
+        return qs
+
+    @staticmethod
+    def search_all_users(email: str | None = None) -> QuerySet[User]:
+        """Platform-wide user search - not scoped to any shared team."""
+        qs = User.objects.filter(is_active=True).order_by("name")
+        if email:
+            qs = qs.filter(email__icontains=email)
+        return qs
+
+    @staticmethod
+    def search_public_teams(search: str | None = None) -> QuerySet[Team]:
+        """Platform-wide team search - not scoped to membership. Approved teams
+        only: a team still under admin review isn't public yet.
+        """
+        qs = Team.objects.filter(status=ApprovalStatus.APPROVED).select_related("created_by").order_by("name")
+        if search:
+            qs = qs.filter(name__icontains=search)
+        return qs
+
+    @staticmethod
     def get_for_member(user, team_id: int) -> Team:
         """Fetch a team the user may view, or raise.
 
