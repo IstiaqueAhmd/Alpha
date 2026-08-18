@@ -8,7 +8,7 @@ from apps.common.pagination import StandardPagination
 from apps.accounts.permissions import IsAdmin
 
 from .models import Team
-from .roles import TeamDomain, hierarchy
+from .roles import ArtistRole, TeamDomain, hierarchy
 from .serializers import (
     HierarchyRoleSerializer,
     InvitationAcceptSerializer,
@@ -26,24 +26,62 @@ from .serializers import (
 from .services import ApprovalService, InvitationService, TeamService
 
 
-class RoleHierarchyView(GenericAPIView):
-    """Reference data: the role hierarchy for each domain.
+# Per-role extra fields the add/invite endpoints require beyond user_id/email
+# + role - see ArtistExtraFieldsMixin in serializers.py, which is the actual
+# validation. This is just the same shape as reference data so a client can
+# render the right form fields without hardcoding "artist is special"
+# somewhere of its own. Roles absent here need nothing extra.
+ROLE_EXTRA_FIELDS: dict[str, list[dict]] = {
+    ArtistRole.ARTIST.value: [
+        {
+            "name": "agency_roster_url",
+            "label": "Official agency/management roster URL",
+            "type": "url",
+            "required": True,
+        },
+        {
+            "name": "confirmation_email",
+            "label": "Artist confirmation email",
+            "type": "email",
+            "required": True,
+        },
+        {
+            "name": "documents",
+            "label": "Proof of representation",
+            "type": "file[]",
+            "required": True,
+        },
+        {
+            "name": "note",
+            "label": "Note",
+            "type": "string",
+            "required": False,
+        },
+    ],
+}
 
-    Lets a client render the role picker without hardcoding the hierarchy that
-    roles.py already owns. Flat list per domain, each row carries its rank.
+
+class RoleHierarchyView(GenericAPIView):
+    """Reference data: the role hierarchy for each domain, plus any extra
+    fields a role needs on add/invite (see ROLE_EXTRA_FIELDS above).
+
+    Lets a client render the role picker - and the right form fields once a
+    role is picked - without hardcoding the hierarchy or the artist-only
+    extra fields that roles.py / serializers.py already own.
     """
 
     permission_classes = [IsAuthenticated]
     serializer_class = HierarchyRoleSerializer
 
     def get(self, request):
+        domains = {}
+        for domain in TeamDomain:
+            rows = hierarchy(domain.value)
+            for row in rows:
+                row["extra_fields"] = ROLE_EXTRA_FIELDS.get(row["role"], [])
+            domains[domain.value] = rows
         return Response(
-            {
-                "success": True,
-                "domains": {
-                    domain.value: hierarchy(domain.value) for domain in TeamDomain
-                },
-            },
+            {"success": True, "domains": domains},
             status=status.HTTP_200_OK,
         )
 
@@ -168,6 +206,10 @@ class TeamMemberListCreateView(GenericAPIView):
             team=team,
             user_id=serializer.validated_data["user_id"],
             role=serializer.validated_data["role"],
+            agency_roster_url=serializer.validated_data.get("agency_roster_url"),
+            confirmation_email=serializer.validated_data.get("confirmation_email"),
+            note=serializer.validated_data.get("note", ""),
+            documents=serializer.validated_data.get("documents"),
         )
         return Response(
             {
@@ -215,6 +257,10 @@ class TeamInvitationListCreateView(GenericAPIView):
             team=team,
             email=serializer.validated_data["email"],
             role=serializer.validated_data["role"],
+            agency_roster_url=serializer.validated_data.get("agency_roster_url"),
+            confirmation_email=serializer.validated_data.get("confirmation_email"),
+            note=serializer.validated_data.get("note", ""),
+            documents=serializer.validated_data.get("documents"),
         )
         return Response(
             {

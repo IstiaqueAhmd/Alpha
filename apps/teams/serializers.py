@@ -1,7 +1,13 @@
 from rest_framework import serializers
 
-from .models import Team, TeamInvitation, TeamMembership
-from .roles import ROLE_CHOICES, TeamDomain, rank_of
+from .models import (
+    ArtistRepresentationDetails,
+    ArtistRepresentationDocument,
+    Team,
+    TeamInvitation,
+    TeamMembership,
+)
+from .roles import ROLE_CHOICES, ArtistRole, TeamDomain, rank_of
 
 
 class TeamUserSerializer(serializers.Serializer):
@@ -62,12 +68,62 @@ class TeamCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=ROLE_CHOICES)
 
 
+class ArtistRepresentationDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ArtistRepresentationDocument
+        fields = ["id", "file", "created_at"]
+        read_only_fields = fields
+
+
+class ArtistRepresentationDetailsSerializer(serializers.ModelSerializer):
+    documents = ArtistRepresentationDocumentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ArtistRepresentationDetails
+        fields = ["agency_roster_url", "confirmation_email", "note", "documents"]
+        read_only_fields = fields
+
+
+class ArtistExtraFieldsMixin(serializers.Serializer):
+    """Fields required only when `role` is the base `artist` role - proof
+    the caller represents them. Shared by MemberAddSerializer and
+    InvitationCreateSerializer so the direct-add and invite-by-email paths
+    everyone already uses take the same extra input for `artist`, instead of
+    a dedicated endpoint of its own.
+    """
+
+    agency_roster_url = serializers.URLField(max_length=500, required=False, allow_blank=True)
+    confirmation_email = serializers.EmailField(required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+    documents = serializers.ListField(
+        child=serializers.FileField(),
+        required=False,
+        allow_empty=True,
+        default=list,
+        max_length=10,
+    )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("role") == ArtistRole.ARTIST.value:
+            if not attrs.get("agency_roster_url") or not attrs.get("confirmation_email"):
+                raise serializers.ValidationError(
+                    "agency_roster_url and confirmation_email are required for the artist role."
+                )
+            if not attrs.get("documents"):
+                raise serializers.ValidationError(
+                    "At least one proof-of-representation document is required for the artist role."
+                )
+        return attrs
+
+
 class TeamMembershipSerializer(serializers.ModelSerializer):
     user = TeamUserSerializer(read_only=True)
     rank = serializers.SerializerMethodField()
     role_label = serializers.CharField(source="get_role_display", read_only=True)
     team_name = serializers.CharField(source="team.name", read_only=True)
     team_domain = serializers.CharField(source="team.domain", read_only=True)
+    artist_representation_details = serializers.SerializerMethodField()
 
     class Meta:
         model = TeamMembership
@@ -80,6 +136,7 @@ class TeamMembershipSerializer(serializers.ModelSerializer):
             "role",
             "role_label",
             "rank",
+            "artist_representation_details",
             "status",
             "approved_at",
             "review_note",
@@ -92,8 +149,16 @@ class TeamMembershipSerializer(serializers.ModelSerializer):
         # so this does not re-query per row.
         return rank_of(obj.team.domain, obj.role)
 
+    def get_artist_representation_details(self, obj: TeamMembership) -> dict | None:
+        # None for every role but artist, and for artist rows added before
+        # this existed.
+        details = getattr(obj, "artist_representation_details", None)
+        if details is None:
+            return None
+        return ArtistRepresentationDetailsSerializer(details).data
 
-class MemberAddSerializer(serializers.Serializer):
+
+class MemberAddSerializer(ArtistExtraFieldsMixin):
     user_id = serializers.IntegerField()
     role = serializers.ChoiceField(choices=ROLE_CHOICES)
 
@@ -101,6 +166,7 @@ class MemberAddSerializer(serializers.Serializer):
 class TeamInvitationSerializer(serializers.ModelSerializer):
     invited_by = TeamUserSerializer(read_only=True)
     role_label = serializers.CharField(source="get_role_display", read_only=True)
+    artist_representation_details = serializers.SerializerMethodField()
 
     class Meta:
         model = TeamInvitation
@@ -110,6 +176,7 @@ class TeamInvitationSerializer(serializers.ModelSerializer):
             "email",
             "role",
             "role_label",
+            "artist_representation_details",
             "status",
             "expires_at",
             "accepted_at",
@@ -118,6 +185,14 @@ class TeamInvitationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_artist_representation_details(self, obj: TeamInvitation) -> dict | None:
+        # Staged here only until acceptance, when it's re-parented onto the
+        # resulting membership - see InvitationService._materialize.
+        details = getattr(obj, "artist_representation_details", None)
+        if details is None:
+            return None
+        return ArtistRepresentationDetailsSerializer(details).data
+
 
 class TeamInvitationTokenSerializer(TeamInvitationSerializer):
     class Meta(TeamInvitationSerializer.Meta):
@@ -125,7 +200,7 @@ class TeamInvitationTokenSerializer(TeamInvitationSerializer):
         read_only_fields = fields
 
 
-class InvitationCreateSerializer(serializers.Serializer):
+class InvitationCreateSerializer(ArtistExtraFieldsMixin):
     email = serializers.EmailField()
     role = serializers.ChoiceField(choices=ROLE_CHOICES)
 
@@ -143,7 +218,15 @@ class ReviewSerializer(serializers.Serializer):
     note = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+class RoleExtraFieldSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    label = serializers.CharField()
+    type = serializers.CharField()
+    required = serializers.BooleanField()
+
+
 class HierarchyRoleSerializer(serializers.Serializer):
     role = serializers.CharField()
     label = serializers.CharField()
     rank = serializers.IntegerField()
+    extra_fields = RoleExtraFieldSerializer(many=True)

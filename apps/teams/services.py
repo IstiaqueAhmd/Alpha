@@ -7,9 +7,16 @@ from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
 from . import exceptions as exc
 from .emails import send_invitation_email
-from .models import ApprovalStatus, Team, TeamInvitation, TeamMembership
+from .models import (
+    ApprovalStatus,
+    ArtistRepresentationDetails,
+    ArtistRepresentationDocument,
+    Team,
+    TeamInvitation,
+    TeamMembership,
+)
 from .notifications import notify_invitation_received
-from .roles import is_valid_role, rank_of
+from .roles import ArtistRole, is_valid_role, rank_of
 
 User = get_user_model()
 
@@ -217,8 +224,25 @@ class TeamService:
         return rank_of(team.domain, membership.role) if membership else None
 
     @staticmethod
-    def add_member(*, actor, team: Team, user_id: int, role: str) -> TeamMembership:
-        """Add an existing platform user directly. Lands PENDING for review."""
+    def add_member(
+        *,
+        actor,
+        team: Team,
+        user_id: int,
+        role: str,
+        agency_roster_url: str | None = None,
+        confirmation_email: str | None = None,
+        note: str = "",
+        documents=None,
+    ) -> TeamMembership:
+        """Add an existing platform user directly. Lands PENDING for review.
+
+        `agency_roster_url` / `confirmation_email` / `note` / `documents` only
+        apply to the base `artist` role (roles.ArtistRole.ARTIST) - proof that
+        the caller represents them. The serializer only requires them for
+        that role; here they just get attached to an `ArtistRepresentationDetails`
+        row when present, so every other role's add flow is untouched.
+        """
         TeamService.assert_can_manage(actor, team)
         TeamService._assert_role_matches_domain(team.domain, role)
 
@@ -229,16 +253,26 @@ class TeamService:
 
         try:
             with transaction.atomic():
-                return TeamMembership.objects.create(
+                membership = TeamMembership.objects.create(
                     team=team,
                     user=target,
                     role=role,
                     status=ApprovalStatus.PENDING,
                     invited_by=actor,
                 )
+                if role == ArtistRole.ARTIST.value:
+                    details = ArtistRepresentationDetails.objects.create(
+                        membership=membership,
+                        agency_roster_url=agency_roster_url,
+                        confirmation_email=confirmation_email,
+                        note=note,
+                    )
+                    for upload in documents or []:
+                        ArtistRepresentationDocument.objects.create(details=details, file=upload)
         except IntegrityError:
             # uniq_team_user - the user is already in this team in some role.
             raise exc.DuplicateMembership()
+        return membership
 
     @staticmethod
     def remove_member(*, actor, team: Team, membership_id: int) -> None:
@@ -250,7 +284,17 @@ class TeamService:
 
 class InvitationService:
     @staticmethod
-    def create(*, actor, team: Team, email: str, role: str) -> TeamInvitation:
+    def create(
+        *,
+        actor,
+        team: Team,
+        email: str,
+        role: str,
+        agency_roster_url: str | None = None,
+        confirmation_email: str | None = None,
+        note: str = "",
+        documents=None,
+    ) -> TeamInvitation:
         """Issue an invitation and email it. Live immediately; acceptance yields
         a pending member.
 
@@ -258,6 +302,11 @@ class InvitationService:
         (apps.accounts.services.OTPService.issue_and_send) - a mail-server
         failure surfaces as a real error to the caller, but never rolls back an
         invitation that was otherwise valid to create.
+
+        Same `artist`-only extra fields as `TeamService.add_member`. There is
+        no membership row yet to attach `ArtistRepresentationDetails` to, so
+        it's parented to this invitation instead - `_materialize` re-points it
+        at the real membership once accepted.
         """
         TeamService.assert_can_manage(actor, team)
         TeamService._assert_role_matches_domain(team.domain, role)
@@ -273,6 +322,15 @@ class InvitationService:
                     status=TeamInvitation.Status.PENDING,
                     expires_at=timezone.now() + _invitation_ttl(),
                 )
+                if role == ArtistRole.ARTIST.value:
+                    details = ArtistRepresentationDetails.objects.create(
+                        invitation=invitation,
+                        agency_roster_url=agency_roster_url,
+                        confirmation_email=confirmation_email,
+                        note=note,
+                    )
+                    for upload in documents or []:
+                        ArtistRepresentationDocument.objects.create(details=details, file=upload)
         except IntegrityError:
             # uniq_live_team_invitation
             raise exc.DuplicateInvitation()
@@ -328,6 +386,16 @@ class InvitationService:
                 status=ApprovalStatus.PENDING,
                 invited_by=invitation.invited_by,
             )
+
+        # Artist invites stage agency_roster_url/confirmation_email/documents
+        # on the invitation (see InvitationService.create) since there's no
+        # membership row until now. Re-point that row at the real membership
+        # - the uploaded documents are never re-uploaded or duplicated.
+        details = getattr(invitation, "artist_representation_details", None)
+        if details is not None and not hasattr(membership, "artist_representation_details"):
+            details.invitation = None
+            details.membership = membership
+            details.save(update_fields=["invitation", "membership", "updated_at"])
 
         invitation.status = TeamInvitation.Status.ACCEPTED
         invitation.accepted_at = timezone.now()

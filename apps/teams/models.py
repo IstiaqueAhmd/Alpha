@@ -125,6 +125,67 @@ class TeamMembership(TimeStampedModel):
         return self.status == ApprovalStatus.APPROVED
 
 
+class ArtistRepresentationDetails(TimeStampedModel):
+
+    membership = models.OneToOneField(
+        TeamMembership,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="artist_representation_details",
+    )
+    invitation = models.OneToOneField(
+        "TeamInvitation",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="artist_representation_details",
+    )
+    agency_roster_url = models.URLField(
+        max_length=500,
+        help_text="Link to the agency/management's public roster page listing this artist.",
+    )
+    confirmation_email = models.EmailField(
+        help_text="Email address the artist confirmed representation from.",
+    )
+    note = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "team_artist_representation_details"
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(membership__isnull=False, invitation__isnull=True)
+                    | models.Q(membership__isnull=True, invitation__isnull=False)
+                ),
+                name="artist_repr_details_exactly_one_parent",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        parent = f"membership {self.membership_id}" if self.membership_id else f"invitation {self.invitation_id}"
+        return f"representation details for {parent}"
+
+
+class ArtistRepresentationDocument(TimeStampedModel):
+    """One uploaded proof-of-representation file. Many per `details` row - a
+    manager may attach a contract, an ID, an agency letter, etc.
+    """
+
+    details = models.ForeignKey(
+        ArtistRepresentationDetails,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    file = models.FileField(upload_to="teams/artist_representation/")
+
+    class Meta:
+        db_table = "team_artist_representation_documents"
+
+    def __str__(self) -> str:
+        return f"document {self.pk}"
+
+
 class TeamInvitation(TimeStampedModel):
     """An invite to hold `role` on `team`, addressed by email.
 
