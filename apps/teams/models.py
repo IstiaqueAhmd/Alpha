@@ -148,6 +148,24 @@ class ArtistRepresentationDetails(TimeStampedModel):
     confirmation_email = models.EmailField(
         help_text="Email address the artist confirmed representation from.",
     )
+
+    # Details about the person submitting the representation claim.
+    company_agency = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Company or agency name of the person adding the artist (optional).",
+    )
+    business_email = models.EmailField(
+        help_text="Work/business email of the person adding the artist.",
+    )
+    adder_role = models.CharField(
+        max_length=255,
+        help_text="Role of the person adding the artist at their company (e.g. Booking Agent, Manager).",
+    )
+    representation = models.TextField(
+        help_text="Free-text description of the representation arrangement.",
+    )
+
     note = models.TextField(blank=True)
 
     class Meta:

@@ -46,6 +46,30 @@ ROLE_EXTRA_FIELDS: dict[str, list[dict]] = {
             "required": True,
         },
         {
+            "name": "company_agency",
+            "label": "Company / Agency name",
+            "type": "string",
+            "required": False,
+        },
+        {
+            "name": "business_email",
+            "label": "Your business / work email",
+            "type": "email",
+            "required": True,
+        },
+        {
+            "name": "adder_role",
+            "label": "Your role at the company (e.g. Booking Agent, Manager)",
+            "type": "string",
+            "required": True,
+        },
+        {
+            "name": "representation",
+            "label": "Representation details",
+            "type": "string",
+            "required": True,
+        },
+        {
             "name": "documents",
             "label": "Proof of representation",
             "type": "file[]",
@@ -208,6 +232,10 @@ class TeamMemberListCreateView(GenericAPIView):
             role=serializer.validated_data["role"],
             agency_roster_url=serializer.validated_data.get("agency_roster_url"),
             confirmation_email=serializer.validated_data.get("confirmation_email"),
+            company_agency=serializer.validated_data.get("company_agency", ""),
+            business_email=serializer.validated_data.get("business_email"),
+            adder_role=serializer.validated_data.get("adder_role"),
+            representation=serializer.validated_data.get("representation"),
             note=serializer.validated_data.get("note", ""),
             documents=serializer.validated_data.get("documents"),
         )
@@ -259,6 +287,10 @@ class TeamInvitationListCreateView(GenericAPIView):
             role=serializer.validated_data["role"],
             agency_roster_url=serializer.validated_data.get("agency_roster_url"),
             confirmation_email=serializer.validated_data.get("confirmation_email"),
+            company_agency=serializer.validated_data.get("company_agency", ""),
+            business_email=serializer.validated_data.get("business_email"),
+            adder_role=serializer.validated_data.get("adder_role"),
+            representation=serializer.validated_data.get("representation"),
             note=serializer.validated_data.get("note", ""),
             documents=serializer.validated_data.get("documents"),
         )

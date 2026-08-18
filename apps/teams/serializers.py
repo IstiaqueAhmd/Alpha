@@ -80,7 +80,16 @@ class ArtistRepresentationDetailsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ArtistRepresentationDetails
-        fields = ["agency_roster_url", "confirmation_email", "note", "documents"]
+        fields = [
+            "agency_roster_url",
+            "confirmation_email",
+            "company_agency",
+            "business_email",
+            "adder_role",
+            "representation",
+            "note",
+            "documents",
+        ]
         read_only_fields = fields
 
 
@@ -94,6 +103,10 @@ class ArtistExtraFieldsMixin(serializers.Serializer):
 
     agency_roster_url = serializers.URLField(max_length=500, required=False, allow_blank=True)
     confirmation_email = serializers.EmailField(required=False, allow_blank=True)
+    company_agency = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    business_email = serializers.EmailField(required=False, allow_blank=True)
+    adder_role = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    representation = serializers.CharField(required=False, allow_blank=True)
     note = serializers.CharField(required=False, allow_blank=True, default="")
     documents = serializers.ListField(
         child=serializers.FileField(),
@@ -109,6 +122,18 @@ class ArtistExtraFieldsMixin(serializers.Serializer):
             if not attrs.get("agency_roster_url") or not attrs.get("confirmation_email"):
                 raise serializers.ValidationError(
                     "agency_roster_url and confirmation_email are required for the artist role."
+                )
+            if not attrs.get("business_email"):
+                raise serializers.ValidationError(
+                    "business_email is required for the artist role."
+                )
+            if not attrs.get("adder_role"):
+                raise serializers.ValidationError(
+                    "adder_role is required for the artist role."
+                )
+            if not attrs.get("representation"):
+                raise serializers.ValidationError(
+                    "representation is required for the artist role."
                 )
             if not attrs.get("documents"):
                 raise serializers.ValidationError(

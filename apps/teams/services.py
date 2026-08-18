@@ -232,14 +232,19 @@ class TeamService:
         role: str,
         agency_roster_url: str | None = None,
         confirmation_email: str | None = None,
+        company_agency: str = "",
+        business_email: str | None = None,
+        adder_role: str | None = None,
+        representation: str | None = None,
         note: str = "",
         documents=None,
     ) -> TeamMembership:
         """Add an existing platform user directly. Lands PENDING for review.
 
-        `agency_roster_url` / `confirmation_email` / `note` / `documents` only
-        apply to the base `artist` role (roles.ArtistRole.ARTIST) - proof that
-        the caller represents them. The serializer only requires them for
+        `agency_roster_url` / `confirmation_email` / `company_agency` /
+        `business_email` / `adder_role` / `representation` / `note` / `documents`
+        only apply to the base `artist` role (roles.ArtistRole.ARTIST) - proof
+        that the caller represents them. The serializer only requires them for
         that role; here they just get attached to an `ArtistRepresentationDetails`
         row when present, so every other role's add flow is untouched.
         """
@@ -265,6 +270,10 @@ class TeamService:
                         membership=membership,
                         agency_roster_url=agency_roster_url,
                         confirmation_email=confirmation_email,
+                        company_agency=company_agency,
+                        business_email=business_email,
+                        adder_role=adder_role,
+                        representation=representation,
                         note=note,
                     )
                     for upload in documents or []:
@@ -292,6 +301,10 @@ class InvitationService:
         role: str,
         agency_roster_url: str | None = None,
         confirmation_email: str | None = None,
+        company_agency: str = "",
+        business_email: str | None = None,
+        adder_role: str | None = None,
+        representation: str | None = None,
         note: str = "",
         documents=None,
     ) -> TeamInvitation:
@@ -327,6 +340,10 @@ class InvitationService:
                         invitation=invitation,
                         agency_roster_url=agency_roster_url,
                         confirmation_email=confirmation_email,
+                        company_agency=company_agency,
+                        business_email=business_email,
+                        adder_role=adder_role,
+                        representation=representation,
                         note=note,
                     )
                     for upload in documents or []:
