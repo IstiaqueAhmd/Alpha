@@ -185,23 +185,42 @@ class ArtistRepresentationDetails(TimeStampedModel):
         return f"representation details for {parent}"
 
 
-class ArtistRepresentationDocument(TimeStampedModel):
-    """One uploaded proof-of-representation file. Many per `details` row - a
-    manager may attach a contract, an ID, an agency letter, etc.
+class MembershipDocument(TimeStampedModel):
+    """An uploaded document attached to a membership or invitation.
+    Can be used for any role (e.g. proof of representation, contracts, ID).
     """
 
-    details = models.ForeignKey(
-        ArtistRepresentationDetails,
+    membership = models.ForeignKey(
+        TeamMembership,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="documents",
     )
-    file = models.FileField(upload_to="teams/artist_representation/")
+    invitation = models.ForeignKey(
+        "TeamInvitation",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    file = models.FileField(upload_to="teams/documents/")
 
     class Meta:
-        db_table = "team_artist_representation_documents"
+        db_table = "team_membership_documents"
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(membership__isnull=False, invitation__isnull=True)
+                    | models.Q(membership__isnull=True, invitation__isnull=False)
+                ),
+                name="membership_doc_exactly_one_parent",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"document {self.pk}"
+        parent = f"membership {self.membership_id}" if self.membership_id else f"invitation {self.invitation_id}"
+        return f"document {self.pk} for {parent}"
 
 
 class TeamInvitation(TimeStampedModel):

@@ -3,8 +3,10 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework_simplejwt.tokens import RefreshToken
+import json
 
 from apps.teams import roles as roles_module
 from apps.teams.models import ApprovalStatus, Team, TeamInvitation, TeamMembership
@@ -315,7 +317,7 @@ class InvitationTests(ApiTestCase):
         # It shows up in the superuser membership queue and can be approved.
         self.login_as(self.superuser)
         res = self.client.post(
-            reverse("teams:review-membership", args=[membership.id]),
+            reverse("teams:membership-review-detail", args=[membership.id]),
             data={"approve": True},
             content_type="application/json",
         )
@@ -493,3 +495,99 @@ class ReferralAutoEnrollTests(TestCase):
             user.save(update_fields=["name", "updated_at"])
 
         self.assertFalse(TeamMembership.objects.filter(user=user).exists())
+
+
+class ArtistPolymorphicPayloadTests(ApiTestCase):
+    def setUp(self):
+        self.founder = make_user("founder@example.com")
+        self.other = make_user("artist@example.com")
+        self.team = Team.objects.create(
+            domain=TeamDomain.ARTIST,
+            name="Team A",
+            created_by=self.founder,
+            status=ApprovalStatus.APPROVED,
+        )
+        TeamMembership.objects.create(
+            team=self.team,
+            user=self.founder,
+            role=ArtistRole.MANAGER,
+            status=ApprovalStatus.APPROVED,
+        )
+
+    def test_add_artist_with_nested_details_succeeds(self):
+        self.login_as(self.founder)
+        file = SimpleUploadedFile("dummy.pdf", b"file_content", content_type="application/pdf")
+        res = self.client.post(
+            reverse("teams:member-list-create", args=[self.team.id]),
+            data={
+                "user_id": self.other.id,
+                "role": "artist",
+                "details": json.dumps({
+                    "agency_roster_url": "https://example.com/artist",
+                    "confirmation_email": "hello@example.com",
+                    "business_email": "biz@example.com",
+                    "adder_role": "agent",
+                    "representation": "full",
+                }),
+                "documents": file
+            },
+        )
+        self.assertEqual(res.status_code, 201)
+        membership = TeamMembership.objects.get(user=self.other)
+        self.assertEqual(membership.role, "artist")
+        # Ensure details were saved properly
+        details = membership.artist_representation_details
+        self.assertEqual(details.agency_roster_url, "https://example.com/artist")
+        self.assertEqual(details.business_email, "biz@example.com")
+
+    def test_add_artist_without_details_fails_validation(self):
+        self.login_as(self.founder)
+        res = self.client.post(
+            reverse("teams:member-list-create", args=[self.team.id]),
+            data={
+                "user_id": self.other.id,
+                "role": "artist",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        # Should raise error for nested details fields
+        errors = res.json()["error"]["details"]
+        self.assertIn("details", errors)
+        
+    def test_add_non_artist_with_documents_succeeds(self):
+        self.login_as(self.founder)
+        file = SimpleUploadedFile("manager_contract.pdf", b"file_content", content_type="application/pdf")
+        res = self.client.post(
+            reverse("teams:member-list-create", args=[self.team.id]),
+            data={
+                "user_id": self.other.id,
+                "role": "manager",
+                "documents": file
+            },
+        )
+        self.assertEqual(res.status_code, 201)
+        membership = TeamMembership.objects.get(user=self.other)
+        self.assertEqual(membership.role, "manager")
+        # Ensure documents were saved globally on the membership
+        self.assertEqual(membership.documents.count(), 1)
+    def test_add_artist_with_invalid_details_fails_validation(self):
+        self.login_as(self.founder)
+        file = SimpleUploadedFile("dummy.pdf", b"file_content", content_type="application/pdf")
+        res = self.client.post(
+            reverse("teams:member-list-create", args=[self.team.id]),
+            data={
+                "user_id": self.other.id,
+                "role": "artist",
+                "details": json.dumps({
+                    # Missing required fields like business_email
+                    "agency_roster_url": "not a url",
+                }),
+                "documents": file
+            },
+        )
+        self.assertEqual(res.status_code, 400)
+        errors = res.json()["error"]["details"]["details"]
+        self.assertIn("agency_roster_url", errors)
+        self.assertIn("business_email", errors)
+

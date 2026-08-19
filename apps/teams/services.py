@@ -10,7 +10,7 @@ from .emails import send_invitation_email
 from .models import (
     ApprovalStatus,
     ArtistRepresentationDetails,
-    ArtistRepresentationDocument,
+    MembershipDocument,
     Team,
     TeamInvitation,
     TeamMembership,
@@ -276,8 +276,8 @@ class TeamService:
                         representation=representation,
                         note=note,
                     )
-                    for upload in documents or []:
-                        ArtistRepresentationDocument.objects.create(details=details, file=upload)
+                for upload in documents or []:
+                    MembershipDocument.objects.create(membership=membership, file=upload)
         except IntegrityError:
             # uniq_team_user - the user is already in this team in some role.
             raise exc.DuplicateMembership()
@@ -346,8 +346,8 @@ class InvitationService:
                         representation=representation,
                         note=note,
                     )
-                    for upload in documents or []:
-                        ArtistRepresentationDocument.objects.create(details=details, file=upload)
+                for upload in documents or []:
+                    MembershipDocument.objects.create(invitation=invitation, file=upload)
         except IntegrityError:
             # uniq_live_team_invitation
             raise exc.DuplicateInvitation()
@@ -404,10 +404,12 @@ class InvitationService:
                 invited_by=invitation.invited_by,
             )
 
-        # Artist invites stage agency_roster_url/confirmation_email/documents
+        # Re-parent any documents staged on the invitation.
+        invitation.documents.update(invitation=None, membership=membership)
+
+        # Artist invites stage agency_roster_url/confirmation_email
         # on the invitation (see InvitationService.create) since there's no
-        # membership row until now. Re-point that row at the real membership
-        # - the uploaded documents are never re-uploaded or duplicated.
+        # membership row until now. Re-point that row at the real membership.
         details = getattr(invitation, "artist_representation_details", None)
         if details is not None and not hasattr(membership, "artist_representation_details"):
             details.invitation = None

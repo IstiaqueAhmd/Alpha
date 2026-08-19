@@ -225,18 +225,19 @@ class TeamMemberListCreateView(GenericAPIView):
         team = TeamService.get_for_member(request.user, team_id)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        details = serializer.validated_data.get("details", {})
         membership = TeamService.add_member(
             actor=request.user,
             team=team,
             user_id=serializer.validated_data["user_id"],
             role=serializer.validated_data["role"],
-            agency_roster_url=serializer.validated_data.get("agency_roster_url"),
-            confirmation_email=serializer.validated_data.get("confirmation_email"),
-            company_agency=serializer.validated_data.get("company_agency", ""),
-            business_email=serializer.validated_data.get("business_email"),
-            adder_role=serializer.validated_data.get("adder_role"),
-            representation=serializer.validated_data.get("representation"),
-            note=serializer.validated_data.get("note", ""),
+            agency_roster_url=details.get("agency_roster_url"),
+            confirmation_email=details.get("confirmation_email"),
+            company_agency=details.get("company_agency", ""),
+            business_email=details.get("business_email"),
+            adder_role=details.get("adder_role"),
+            representation=details.get("representation"),
+            note=details.get("note", ""),
             documents=serializer.validated_data.get("documents"),
         )
         return Response(
@@ -280,18 +281,19 @@ class TeamInvitationListCreateView(GenericAPIView):
         team = TeamService.get_for_member(request.user, team_id)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        details = serializer.validated_data.get("details", {})
         invitation = InvitationService.create(
             actor=request.user,
             team=team,
             email=serializer.validated_data["email"],
             role=serializer.validated_data["role"],
-            agency_roster_url=serializer.validated_data.get("agency_roster_url"),
-            confirmation_email=serializer.validated_data.get("confirmation_email"),
-            company_agency=serializer.validated_data.get("company_agency", ""),
-            business_email=serializer.validated_data.get("business_email"),
-            adder_role=serializer.validated_data.get("adder_role"),
-            representation=serializer.validated_data.get("representation"),
-            note=serializer.validated_data.get("note", ""),
+            agency_roster_url=details.get("agency_roster_url"),
+            confirmation_email=details.get("confirmation_email"),
+            company_agency=details.get("company_agency", ""),
+            business_email=details.get("business_email"),
+            adder_role=details.get("adder_role"),
+            representation=details.get("representation"),
+            note=details.get("note", ""),
             documents=serializer.validated_data.get("documents"),
         )
         return Response(

@@ -1,8 +1,9 @@
+import json
 from rest_framework import serializers
 
 from .models import (
     ArtistRepresentationDetails,
-    ArtistRepresentationDocument,
+    MembershipDocument,
     Team,
     TeamInvitation,
     TeamMembership,
@@ -68,15 +69,14 @@ class TeamCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=ROLE_CHOICES)
 
 
-class ArtistRepresentationDocumentSerializer(serializers.ModelSerializer):
+class MembershipDocumentSerializer(serializers.ModelSerializer):
     class Meta:
-        model = ArtistRepresentationDocument
+        model = MembershipDocument
         fields = ["id", "file", "created_at"]
         read_only_fields = fields
 
 
 class ArtistRepresentationDetailsSerializer(serializers.ModelSerializer):
-    documents = ArtistRepresentationDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = ArtistRepresentationDetails
@@ -88,67 +88,31 @@ class ArtistRepresentationDetailsSerializer(serializers.ModelSerializer):
             "adder_role",
             "representation",
             "note",
-            "documents",
         ]
         read_only_fields = fields
 
 
-class ArtistExtraFieldsMixin(serializers.Serializer):
-    """Fields required only when `role` is the base `artist` role - proof
-    the caller represents them. Shared by MemberAddSerializer and
-    InvitationCreateSerializer so the direct-add and invite-by-email paths
-    everyone already uses take the same extra input for `artist`, instead of
-    a dedicated endpoint of its own.
-    """
+class ArtistDetailsInputSerializer(serializers.Serializer):
+    """Nested payload strictly validated for the `artist` role."""
 
-    agency_roster_url = serializers.URLField(max_length=500, required=False, allow_blank=True)
-    confirmation_email = serializers.EmailField(required=False, allow_blank=True)
+    agency_roster_url = serializers.URLField(max_length=500)
+    confirmation_email = serializers.EmailField()
     company_agency = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
-    business_email = serializers.EmailField(required=False, allow_blank=True)
-    adder_role = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    representation = serializers.CharField(required=False, allow_blank=True)
+    business_email = serializers.EmailField()
+    adder_role = serializers.CharField(max_length=255)
+    representation = serializers.CharField()
     note = serializers.CharField(required=False, allow_blank=True, default="")
-    documents = serializers.ListField(
-        child=serializers.FileField(),
-        required=False,
-        allow_empty=True,
-        default=list,
-        max_length=10,
-    )
-
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        if attrs.get("role") == ArtistRole.ARTIST.value:
-            if not attrs.get("agency_roster_url") or not attrs.get("confirmation_email"):
-                raise serializers.ValidationError(
-                    "agency_roster_url and confirmation_email are required for the artist role."
-                )
-            if not attrs.get("business_email"):
-                raise serializers.ValidationError(
-                    "business_email is required for the artist role."
-                )
-            if not attrs.get("adder_role"):
-                raise serializers.ValidationError(
-                    "adder_role is required for the artist role."
-                )
-            if not attrs.get("representation"):
-                raise serializers.ValidationError(
-                    "representation is required for the artist role."
-                )
-            if not attrs.get("documents"):
-                raise serializers.ValidationError(
-                    "At least one proof-of-representation document is required for the artist role."
-                )
-        return attrs
 
 
 class TeamMembershipSerializer(serializers.ModelSerializer):
+
     user = TeamUserSerializer(read_only=True)
     rank = serializers.SerializerMethodField()
     role_label = serializers.CharField(source="get_role_display", read_only=True)
     team_name = serializers.CharField(source="team.name", read_only=True)
     team_domain = serializers.CharField(source="team.domain", read_only=True)
     artist_representation_details = serializers.SerializerMethodField()
+    documents = MembershipDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = TeamMembership
@@ -162,6 +126,7 @@ class TeamMembershipSerializer(serializers.ModelSerializer):
             "role_label",
             "rank",
             "artist_representation_details",
+            "documents",
             "status",
             "approved_at",
             "review_note",
@@ -183,15 +148,49 @@ class TeamMembershipSerializer(serializers.ModelSerializer):
         return ArtistRepresentationDetailsSerializer(details).data
 
 
-class MemberAddSerializer(ArtistExtraFieldsMixin):
+class MemberAddSerializer(serializers.Serializer):
     user_id = serializers.IntegerField()
     role = serializers.ChoiceField(choices=ROLE_CHOICES)
+    details = serializers.JSONField(required=False, default=dict)
+    documents = serializers.ListField(
+        child=serializers.FileField(),
+        required=False,
+        allow_empty=True,
+        default=list,
+        max_length=10,
+    )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        role = attrs.get("role")
+        details = attrs.get("details", {})
+        
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except ValueError:
+                raise serializers.ValidationError({"details": "Must be a valid JSON object."})
+                
+        if not isinstance(details, dict):
+            raise serializers.ValidationError({"details": "Must be a JSON object."})
+            
+        if role == ArtistRole.ARTIST.value:
+            details_serializer = ArtistDetailsInputSerializer(data=details)
+            if not details_serializer.is_valid():
+                raise serializers.ValidationError({"details": details_serializer.errors})
+                
+            attrs["details"] = details_serializer.validated_data
+        else:
+            attrs["details"] = {}
+            
+        return attrs
 
 
 class TeamInvitationSerializer(serializers.ModelSerializer):
     invited_by = TeamUserSerializer(read_only=True)
     role_label = serializers.CharField(source="get_role_display", read_only=True)
     artist_representation_details = serializers.SerializerMethodField()
+    documents = MembershipDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = TeamInvitation
@@ -202,6 +201,7 @@ class TeamInvitationSerializer(serializers.ModelSerializer):
             "role",
             "role_label",
             "artist_representation_details",
+            "documents",
             "status",
             "expires_at",
             "accepted_at",
@@ -225,9 +225,42 @@ class TeamInvitationTokenSerializer(TeamInvitationSerializer):
         read_only_fields = fields
 
 
-class InvitationCreateSerializer(ArtistExtraFieldsMixin):
+class InvitationCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(choices=ROLE_CHOICES)
+    details = serializers.JSONField(required=False, default=dict)
+    documents = serializers.ListField(
+        child=serializers.FileField(),
+        required=False,
+        allow_empty=True,
+        default=list,
+        max_length=10,
+    )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        role = attrs.get("role")
+        details = attrs.get("details", {})
+        
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except ValueError:
+                raise serializers.ValidationError({"details": "Must be a valid JSON object."})
+                
+        if not isinstance(details, dict):
+            raise serializers.ValidationError({"details": "Must be a JSON object."})
+            
+        if role == ArtistRole.ARTIST.value:
+            details_serializer = ArtistDetailsInputSerializer(data=details)
+            if not details_serializer.is_valid():
+                raise serializers.ValidationError({"details": details_serializer.errors})
+                
+            attrs["details"] = details_serializer.validated_data
+        else:
+            attrs["details"] = {}
+            
+        return attrs
 
 
 class InvitationAcceptSerializer(serializers.Serializer):
