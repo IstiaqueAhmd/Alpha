@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "apps.pages",
     "apps.inquiries",
     "apps.offers",
+    "apps.avails",
     "drf_spectacular",
 ]
 

@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/v1/pages/", include("apps.pages.urls")),
     path("api/v1/inquiries/", include("apps.inquiries.urls")),
     path("api/v1/offers/", include("apps.offers.urls")),
+    path("api/v1/avails/", include("apps.avails.urls")),
 ]
 
 if "drf_spectacular" in settings.INSTALLED_APPS:
