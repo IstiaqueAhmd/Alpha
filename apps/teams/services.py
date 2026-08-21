@@ -95,10 +95,10 @@ class TeamService:
         return qs
 
     @staticmethod
-    def search_related_users(user, email: str | None = None) -> QuerySet[User]:
+    def search_related_users(user, search: str | None = None) -> QuerySet[User]:
         """Users who share at least one approved team with `user` - i.e. teammates
         across every team `user` belongs to, regardless of which team. Excludes
-        `user` themselves. `email` filters case-insensitively, substring.
+        `user` themselves. `search` filters case-insensitively, substring on name or email.
         """
         my_team_ids = TeamMembership.objects.filter(
             user=user, status=ApprovalStatus.APPROVED
@@ -113,8 +113,8 @@ class TeamService:
             .distinct()
             .order_by("name")
         )
-        if email:
-            qs = qs.filter(email__icontains=email)
+        if search:
+            qs = qs.filter(Q(email__icontains=search) | Q(name__icontains=search))
         return qs
 
     @staticmethod

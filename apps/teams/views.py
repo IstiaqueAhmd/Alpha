@@ -146,7 +146,8 @@ class RelatedUserSearchView(GenericAPIView):
     pagination_class = StandardPagination
 
     def get(self, request):
-        qs = TeamService.search_related_users(request.user, email=request.query_params.get("email"))
+        search_term = request.query_params.get("search") or request.query_params.get("email")
+        qs = TeamService.search_related_users(request.user, search=search_term)
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(TeamUserSerializer(page, many=True).data)
