@@ -70,12 +70,6 @@ ROLE_EXTRA_FIELDS: dict[str, list[dict]] = {
             "required": True,
         },
         {
-            "name": "documents",
-            "label": "Proof of representation",
-            "type": "file[]",
-            "required": True,
-        },
-        {
             "name": "note",
             "label": "Note",
             "type": "string",
