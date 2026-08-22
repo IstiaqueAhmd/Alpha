@@ -164,14 +164,18 @@ class AvailEntryUpdateDatesSerializer(serializers.Serializer):
 
 
 class AvailShareCreateSerializer(serializers.Serializer):
-    user_id = serializers.IntegerField(required=False)
-    email = serializers.EmailField(required=False, allow_blank=True)
+    user_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, allow_empty=True, default=list
+    )
+    emails = serializers.ListField(
+        child=serializers.EmailField(), required=False, allow_empty=True, default=list
+    )
     message = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if not attrs.get("user_id") and not attrs.get("email"):
+        if not attrs.get("user_ids") and not attrs.get("emails"):
             raise serializers.ValidationError(
-                "Either user_id or email is required."
+                "Either user_ids or emails must be provided."
             )
         return attrs

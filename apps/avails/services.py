@@ -5,7 +5,9 @@ from django.db import IntegrityError, models, transaction
 from django.db.models import Count, Prefetch, Q, QuerySet
 
 from . import exceptions as exc
+from .emails import send_share_email
 from .models import AvailDate, AvailEntry, AvailList, AvailShare, Visibility
+from .notifications import notify_share_received
 
 User = get_user_model()
 
@@ -20,9 +22,11 @@ class AvailListService:
     @staticmethod
     def _can_view(user, avail_list: AvailList) -> bool:
         """Check if a user is allowed to view a list."""
-        if avail_list.owner_id == user.id:
-            return True
         if avail_list.visibility == Visibility.PUBLIC:
+            return True
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        if avail_list.owner_id == user.id:
             return True
         # Private -- only if explicitly shared.
         return AvailShare.objects.filter(
@@ -295,44 +299,64 @@ class AvailShareService:
     """Sharing avail lists with other users."""
 
     @staticmethod
-    def share(
+    def share_bulk(
         *,
         user,
         list_id: int,
-        shared_with_id: int | None = None,
-        email: str | None = None,
+        user_ids: list[int] | None = None,
+        emails: list[str] | None = None,
         message: str = "",
-    ) -> AvailShare:
-        """Share a list. Owner only."""
+    ) -> list[AvailShare]:
+        """Share a list with multiple users/emails. Owner only."""
         avail_list = AvailListService.get(user, list_id)
         AvailListService._assert_owner(user, avail_list)
 
-        shared_with = None
-        shared_email = ""
+        user_ids = user_ids or []
+        emails = [e.lower().strip() for e in (emails or [])]
 
-        if shared_with_id:
-            try:
-                shared_with = User.objects.get(pk=shared_with_id, is_active=True)
-            except User.DoesNotExist:
-                raise exc.AvailShareNotFound(detail="No active user with that id.")
-        elif email:
-            shared_email = email.lower().strip()
-            # Try to resolve email to a platform user.
-            shared_with = User.objects.filter(
-                email__iexact=shared_email, is_active=True
-            ).first()
+        # 1. Fetch existing shares to avoid N+1 queries and IntegrityError inside loops
+        existing_shares = AvailShare.objects.filter(avail_list=avail_list)
+        existing_user_ids = set(existing_shares.filter(shared_with__isnull=False).values_list("shared_with_id", flat=True))
+        existing_emails = set(existing_shares.filter(shared_with__isnull=True).values_list("shared_email", flat=True))
 
-        try:
-            share = AvailShare.objects.create(
-                avail_list=avail_list,
-                shared_by=user,
-                shared_with=shared_with,
-                shared_email=shared_email,
-                message=message,
-            )
-        except IntegrityError:
-            raise exc.DuplicateAvailShare()
-        return share
+        # 2. Find new users (by ID) avoiding existing ones
+        users_to_add = list(User.objects.filter(id__in=user_ids, is_active=True).exclude(id__in=existing_user_ids))
+        
+        # 3. Find new users (by email) avoiding existing ones
+        email_users = list(User.objects.filter(email__in=emails, is_active=True).exclude(id__in=existing_user_ids))
+        email_user_emails = {u.email.lower() for u in email_users}
+        
+        # 4. Remaining emails are for non-platform users (and not already shared)
+        unmatched_emails = [e for e in emails if e not in email_user_emails and e not in existing_emails]
+        
+        # 5. Deduplicate the platform users
+        all_users_to_add = {u.id: u for u in users_to_add + email_users}.values()
+        
+        shares = []
+        with transaction.atomic():
+            for u in all_users_to_add:
+                shares.append(AvailShare.objects.create(
+                    avail_list=avail_list,
+                    shared_by=user,
+                    shared_with=u,
+                    shared_email="",
+                    message=message,
+                ))
+                    
+            for e in unmatched_emails:
+                shares.append(AvailShare.objects.create(
+                    avail_list=avail_list,
+                    shared_by=user,
+                    shared_with=None,
+                    shared_email=e,
+                    message=message,
+                ))
+
+        for share in shares:
+            send_share_email(share=share)
+            notify_share_received(share=share)
+
+        return shares
 
     @staticmethod
     def unshare(*, user, list_id: int, share_id: int) -> None:

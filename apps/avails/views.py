@@ -1,6 +1,6 @@
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from apps.common.pagination import StandardPagination
@@ -121,6 +121,11 @@ class AvailListDetailView(GenericAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = AvailListUpdateSerializer
 
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return super().get_permissions()
+
     def get(self, request, list_id: int):
         avail_list = AvailListService.get_with_entries(request.user, list_id)
         return Response(
@@ -161,6 +166,11 @@ class AvailEntryListCreateView(GenericAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = AvailEntryCreateSerializer
     pagination_class = StandardPagination
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return super().get_permissions()
 
     def get(self, request, list_id: int):
         qs = AvailEntryService.list_entries(
@@ -271,18 +281,18 @@ class AvailShareListCreateView(GenericAPIView):
     def post(self, request, list_id: int):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        share = AvailShareService.share(
+        shares = AvailShareService.share_bulk(
             user=request.user,
             list_id=list_id,
-            shared_with_id=serializer.validated_data.get("user_id"),
-            email=serializer.validated_data.get("email"),
+            user_ids=serializer.validated_data.get("user_ids", []),
+            emails=serializer.validated_data.get("emails", []),
             message=serializer.validated_data.get("message", ""),
         )
         return Response(
             {
                 "success": True,
-                "message": "List shared.",
-                "share": AvailShareSerializer(share).data,
+                "message": "List shared successfully.",
+                "shares": AvailShareSerializer(shares, many=True).data,
             },
             status=status.HTTP_201_CREATED,
         )
