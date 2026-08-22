@@ -211,7 +211,7 @@ class TeamMemberListCreateView(GenericAPIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         response = paginator.get_paginated_response(
-            TeamMembershipSerializer(page, many=True).data
+            TeamMembershipSerializer(page, many=True, context={"request": request}).data
         )
         response.data["counts"] = TeamService.member_counts(team)
         return response
@@ -239,7 +239,7 @@ class TeamMemberListCreateView(GenericAPIView):
             {
                 "success": True,
                 "message": "Member submitted for approval.",
-                "membership": TeamMembershipSerializer(membership).data,
+                "membership": TeamMembershipSerializer(membership, context={"request": request}).data,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -269,7 +269,7 @@ class TeamInvitationListCreateView(GenericAPIView):
         page = paginator.paginate_queryset(qs, request, view=self)
         # Token included: the caller is an approved member of the issuing team.
         return paginator.get_paginated_response(
-            TeamInvitationTokenSerializer(page, many=True).data
+            TeamInvitationTokenSerializer(page, many=True, context={"request": request}).data
         )
 
     def post(self, request, team_id: int):
@@ -295,7 +295,7 @@ class TeamInvitationListCreateView(GenericAPIView):
             {
                 "success": True,
                 "message": "Invitation sent.",
-                "invitation": TeamInvitationTokenSerializer(invitation).data,
+                "invitation": TeamInvitationTokenSerializer(invitation, context={"request": request}).data,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -311,7 +311,7 @@ class TeamInvitationRevokeView(GenericAPIView):
             actor=request.user, team=team, invitation_id=invitation_id
         )
         return Response(
-            {"success": True, "invitation": TeamInvitationSerializer(invitation).data},
+            {"success": True, "invitation": TeamInvitationSerializer(invitation, context={"request": request}).data},
             status=status.HTTP_200_OK,
         )
 
@@ -330,7 +330,7 @@ class InvitationAcceptView(GenericAPIView):
             {
                 "success": True,
                 "message": "Invitation accepted. Your membership is awaiting approval.",
-                "membership": TeamMembershipSerializer(membership).data,
+                "membership": TeamMembershipSerializer(membership, context={"request": request}).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -350,7 +350,7 @@ class InvitationDeclineView(GenericAPIView):
             {
                 "success": True,
                 "message": "Invitation declined.",
-                "invitation": TeamInvitationSerializer(invitation).data,
+                "invitation": TeamInvitationSerializer(invitation, context={"request": request}).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -376,7 +376,7 @@ class MembershipReviewListView(GenericAPIView):
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(
-            TeamMembershipSerializer(page, many=True).data
+            TeamMembershipSerializer(page, many=True, context={"request": request}).data
         )
 
 
@@ -387,7 +387,7 @@ class MembershipReviewDetailView(GenericAPIView):
     def get(self, request, membership_id: int):
         membership = ApprovalService.get_membership(membership_id)
         return Response(
-            {"success": True, "membership": TeamMembershipSerializer(membership).data},
+            {"success": True, "membership": TeamMembershipSerializer(membership, context={"request": request}).data},
             status=status.HTTP_200_OK,
         )
 
@@ -401,7 +401,7 @@ class MembershipReviewDetailView(GenericAPIView):
             note=serializer.validated_data.get("note", ""),
         )
         return Response(
-            {"success": True, "membership": TeamMembershipSerializer(membership).data},
+            {"success": True, "membership": TeamMembershipSerializer(membership, context={"request": request}).data},
             status=status.HTTP_200_OK,
         )
 
