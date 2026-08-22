@@ -118,6 +118,29 @@ class TeamService:
         return qs
 
     @staticmethod
+    def search_related_artists(user, search: str | None = None) -> QuerySet[User]:
+        """Artists across every approved team `user` belongs to."""
+        from apps.teams.roles import ArtistRole
+        
+        my_team_ids = TeamMembership.objects.filter(
+            user=user, status=ApprovalStatus.APPROVED
+        ).values_list("team_id", flat=True)
+        
+        qs = (
+            User.objects.filter(
+                team_memberships__team_id__in=my_team_ids,
+                team_memberships__status=ApprovalStatus.APPROVED,
+                team_memberships__role=ArtistRole.ARTIST.value,
+                is_active=True,
+            )
+            .distinct()
+            .order_by("name")
+        )
+        if search:
+            qs = qs.filter(Q(email__icontains=search) | Q(name__icontains=search))
+        return qs
+
+    @staticmethod
     def search_all_users(email: str | None = None) -> QuerySet[User]:
         """Platform-wide user search - not scoped to any shared team."""
         qs = User.objects.filter(is_active=True).order_by("name")

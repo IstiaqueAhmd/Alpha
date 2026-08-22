@@ -6,6 +6,7 @@ app_name = "teams"
 urlpatterns = [
     path("roles/", views.RoleHierarchyView.as_view(), name="role-hierarchy"),
     path("users/related/", views.RelatedUserSearchView.as_view(), name="related-user-search"),
+    path("artists/related/", views.RelatedArtistSearchView.as_view(), name="related-artist-search"),
     path("users/", views.PublicUserSearchView.as_view(), name="public-user-search"),
     path("public/", views.PublicTeamSearchView.as_view(), name="public-team-search"),
     path("", views.TeamListCreateView.as_view(), name="team-list-create"),
