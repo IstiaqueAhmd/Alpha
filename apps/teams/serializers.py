@@ -16,6 +16,7 @@ class TeamUserSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     name = serializers.CharField(read_only=True)
     email = serializers.EmailField(read_only=True)
+    image = serializers.ImageField(read_only=True)
 
 
 class TeamSerializer(serializers.ModelSerializer):
