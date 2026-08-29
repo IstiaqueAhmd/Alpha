@@ -55,6 +55,10 @@ class Migration(migrations.Migration):
             model_name='bookingoffer',
             index=models.Index(fields=['target_user', 'status', '-event_date'], name='booking_off_target__13d0ad_idx'),
         ),
+        migrations.RunSQL(
+            "UPDATE booking_offers SET target_email = 'legacy@example.com' WHERE target_user_id IS NULL AND target_email = '';",
+            reverse_sql=migrations.RunSQL.noop,
+        ),
         migrations.AddConstraint(
             model_name='bookingoffer',
             constraint=models.CheckConstraint(condition=models.Q(('target_user__isnull', False), models.Q(('target_email', ''), _negated=True), _connector='OR'), name='booking_offer_has_target'),
