@@ -15,8 +15,8 @@ class AvailabilitySlotAdmin(admin.ModelAdmin):
 class BookingOfferAdmin(admin.ModelAdmin):
     list_display = (
         "title",
-        "artist",
-        "seatgeek_performer",
+        "target_user",
+        "target_email",
         "requester",
         "event_date",
         "amount_cents",
@@ -26,12 +26,12 @@ class BookingOfferAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = (
         "title",
-        "artist__email",
-        "seatgeek_performer__name",
+        "target_user__email",
+        "target_email",
         "requester__email",
         "venue_name",
     )
-    autocomplete_fields = ("artist", "requester")
+    autocomplete_fields = ("target_user", "requester")
     readonly_fields = ("created_at", "updated_at", "decided_at")
 
 
