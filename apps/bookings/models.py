@@ -48,35 +48,16 @@ class BookingOffer(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="sent_offers",
     )
-    # Talent-buyer who receives the request and accepts/rejects it.
-    # Nullable at the DB level for legacy rows; required for all new offers
-    # (enforced in BookingOfferCreateSerializer / BookingService.create_offer).
-    recipient = models.ForeignKey(
+    # The user who receives the request (if found on the platform)
+    target_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="received_offers",
-        limit_choices_to={"role": "talent-buyer"},
         null=True,
         blank=True,
     )
-    # Subject of the booking (internal artist). Exactly one of
-    # artist / seatgeek_performer is set (see check constraint below).
-    artist = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="subject_offers",
-        limit_choices_to={"role": "artist"},
-        null=True,
-        blank=True,
-    )
-    # Subject of the booking (external SeatGeek performer).
-    seatgeek_performer = models.ForeignKey(
-        "seatgeek.Performers",
-        on_delete=models.SET_NULL,
-        related_name="subject_offers",
-        null=True,
-        blank=True,
-    )
+    # The email to send the request to (if the user is not found)
+    target_email = models.EmailField(blank=True)
 
     title = models.CharField(max_length=255)
     event_date = models.DateField()
@@ -100,19 +81,16 @@ class BookingOffer(TimeStampedModel):
         db_table = "booking_offers"
         ordering = ("-event_date",)
         indexes = [
-            models.Index(fields=["recipient", "status", "-event_date"]),
-            models.Index(fields=["artist", "status", "-event_date"]),
+            models.Index(fields=["target_user", "status", "-event_date"]),
             models.Index(fields=["requester", "-created_at"]),
             models.Index(fields=["status", "event_date"]),
-            models.Index(fields=["seatgeek_performer", "status", "-event_date"]),
         ]
         constraints = [
             models.CheckConstraint(
                 check=(
-                    models.Q(artist__isnull=False, seatgeek_performer__isnull=True)
-                    | models.Q(artist__isnull=True, seatgeek_performer__isnull=False)
+                    models.Q(target_user__isnull=False) | ~models.Q(target_email="")
                 ),
-                name="booking_offer_artist_xor_seatgeek",
+                name="booking_offer_has_target",
             ),
         ]
 

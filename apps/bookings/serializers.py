@@ -18,27 +18,17 @@ class AvailabilitySlotUpsertSerializer(serializers.Serializer):
     note = serializers.CharField(max_length=255, allow_blank=True, required=False)
 
 
-class BookingOfferSeatGeekPerformerSerializer(serializers.Serializer):
-    id = serializers.CharField()
-    name = serializers.CharField()
-    image = serializers.CharField()
-    url = serializers.CharField()
-
-
 class BookingOfferSerializer(serializers.ModelSerializer):
     requester = UserSerializer(read_only=True)
-    recipient = UserSerializer(read_only=True)
-    artist = UserSerializer(read_only=True)
-    seatgeek_performer = BookingOfferSeatGeekPerformerSerializer(read_only=True)
+    target_user = UserSerializer(read_only=True)
 
     class Meta:
         model = BookingOffer
         fields = (
             "id",
             "requester",
-            "recipient",
-            "artist",
-            "seatgeek_performer",
+            "target_user",
+            "target_email",
             "title",
             "event_date",
             "event_time",
@@ -58,9 +48,7 @@ class BookingOfferSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "requester",
-            "recipient",
-            "artist",
-            "seatgeek_performer",
+            "target_user",
             "status",
             "decided_at",
             "created_at",
@@ -68,8 +56,8 @@ class BookingOfferSerializer(serializers.ModelSerializer):
 
 
 class BookingOfferCreateSerializer(serializers.Serializer):
-    artist_id = serializers.CharField(max_length=191)
-    recipient_id = serializers.IntegerField(min_value=1)
+    target_user_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    target_email = serializers.EmailField(required=False, allow_blank=True)
     title = serializers.CharField(max_length=255)
     event_date = serializers.DateField()
     event_time = serializers.TimeField(required=False, allow_null=True)
@@ -88,6 +76,10 @@ class BookingOfferCreateSerializer(serializers.Serializer):
         hi = attrs.get("budget_max_cents")
         if lo is not None and hi is not None and lo > hi:
             raise serializers.ValidationError({"budget_max_cents": "Must be >= budget_min_cents."})
+        target_user_id = attrs.get("target_user_id")
+        target_email = attrs.get("target_email")
+        if not target_user_id and not target_email:
+            raise serializers.ValidationError("Either target_user_id or target_email must be provided.")
         return attrs
 
 

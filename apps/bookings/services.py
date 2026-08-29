@@ -48,55 +48,42 @@ class AvailabilityService:
 class BookingService:
     @classmethod
     @transaction.atomic
-    def create_offer(cls, *, requester: User, artist_id: str, recipient_id: int, **fields) -> BookingOffer:
-        artist, sg_performer = cls._resolve_target(artist_id)
-        if not artist and not sg_performer:
-            raise NotFound("Artist not found.")
-        recipient = cls._resolve_recipient(recipient_id, requester)
+    def create_offer(cls, *, requester: User, target_user_id: int | None = None, target_email: str = "", **fields) -> BookingOffer:
+        target_user = None
+        if target_user_id:
+            target_user = User.objects.filter(pk=target_user_id, is_active=True).first()
+            if not target_user:
+                raise NotFound("Target user not found.")
+            if target_user.pk == requester.pk:
+                raise ValidationError("You cannot send an offer to yourself.")
 
         offer = BookingOffer.objects.create(
             requester=requester,
-            recipient=recipient,
-            artist=artist,
-            seatgeek_performer=sg_performer,
+            target_user=target_user,
+            target_email=target_email,
             **fields,
         )
-        Activity.objects.create(
-            user=recipient,
-            verb=Activity.Verb.OFFER_RECEIVED,
-            summary="Offer received",
-            detail=offer.title,
-            metadata={"offer_id": offer.pk, "from_user_id": requester.pk},
-        )
+
+        if target_user:
+            Activity.objects.create(
+                user=target_user,
+                verb=Activity.Verb.OFFER_RECEIVED,
+                summary="Offer received",
+                detail=offer.title,
+                metadata={"offer_id": offer.pk, "from_user_id": requester.pk},
+            )
+            # Send email
+            print(f"Sending booking request email to {target_user.email}")
+        elif target_email:
+            # Send email
+            print(f"Sending booking request email to {target_email}")
+            
         return offer
-
-    @staticmethod
-    def _resolve_target(artist_id: str) -> tuple[User | None, SeatGeekPerformer | None]:
-        raw = str(artist_id)
-        if raw.isdigit():
-            artist = User.objects.filter(
-                pk=int(raw), role=User.Role.ARTIST, is_active=True,
-            ).first()
-            if artist:
-                return artist, None
-        sg = SeatGeekPerformer.objects.filter(pk=raw).first()
-        return None, sg
-
-    @staticmethod
-    def _resolve_recipient(recipient_id: int, requester: User) -> User:
-        recipient = User.objects.filter(
-            pk=recipient_id, role=User.Role.TALENT_BUYER, is_active=True,
-        ).first()
-        if not recipient:
-            raise NotFound("Recipient talent-buyer not found.")
-        if recipient.pk == requester.pk:
-            raise ValidationError("You cannot send an offer to yourself.")
-        return recipient
 
     @classmethod
     @transaction.atomic
-    def accept(cls, *, recipient: User, offer_id: int) -> BookingOffer:
-        offer = cls._get_owned_offer(recipient, offer_id)
+    def accept(cls, *, target_user: User, offer_id: int) -> BookingOffer:
+        offer = cls._get_owned_offer(target_user, offer_id)
         if offer.status != BookingOffer.Status.PENDING:
             raise ValidationError("Offer is not pending.")
 
@@ -104,15 +91,8 @@ class BookingService:
         offer.decided_at = timezone.now()
         offer.save(update_fields=["status", "decided_at", "updated_at"])
 
-        # Block the artist's calendar. Only internal artists have slots;
-        # SeatGeek performers (external subjects) have no AvailabilitySlot.
-        if offer.artist_id:
-            AvailabilitySlot.objects.update_or_create(
-                user_id=offer.artist_id, date=offer.event_date,
-                defaults={"status": AvailabilitySlot.Status.BOOKED, "note": offer.title},
-            )
         Activity.objects.create(
-            user=recipient, verb=Activity.Verb.OFFER_ACCEPTED,
+            user=target_user, verb=Activity.Verb.OFFER_ACCEPTED,
             summary="Offer accepted", detail=offer.title,
             metadata={"offer_id": offer.pk},
         )
@@ -125,8 +105,8 @@ class BookingService:
 
     @classmethod
     @transaction.atomic
-    def reject(cls, *, recipient: User, offer_id: int) -> BookingOffer:
-        offer = cls._get_owned_offer(recipient, offer_id)
+    def reject(cls, *, target_user: User, offer_id: int) -> BookingOffer:
+        offer = cls._get_owned_offer(target_user, offer_id)
         if offer.status != BookingOffer.Status.PENDING:
             raise ValidationError("Offer is not pending.")
         offer.status = BookingOffer.Status.REJECTED
@@ -140,7 +120,7 @@ class BookingService:
         return offer
 
     @staticmethod
-    def list_received(recipient: User, *, status_filter: str | None = None) -> QuerySet[BookingOffer]:
+    def list_received(target_user: User, *, status_filter: str | None = None) -> QuerySet[BookingOffer]:
         """Offers received by a talent-buyer, filtered to one Bookings tab.
 
         Tabs map to status_filter:
@@ -150,8 +130,8 @@ class BookingService:
         """
         today = timezone.now().date()
         qs = BookingOffer.objects.select_related(
-            "requester", "recipient", "artist"
-        ).filter(recipient=recipient)
+            "requester", "target_user"
+        ).filter(target_user=target_user)
         if status_filter == "pending":
             qs = qs.filter(status=BookingOffer.Status.PENDING)
         elif status_filter == "confirmed":
@@ -166,12 +146,12 @@ class BookingService:
     @staticmethod
     def list_for_requester(user: User) -> QuerySet[BookingOffer]:
         return BookingOffer.objects.select_related(
-            "requester", "recipient", "artist"
+            "requester", "target_user"
         ).filter(requester=user)
 
     @staticmethod
-    def _get_owned_offer(recipient: User, offer_id: int) -> BookingOffer:
-        offer = BookingOffer.objects.filter(pk=offer_id, recipient=recipient).first()
+    def _get_owned_offer(target_user: User, offer_id: int) -> BookingOffer:
+        offer = BookingOffer.objects.filter(pk=offer_id, target_user=target_user).first()
         if not offer:
             raise NotFound("Offer not found.")
         return offer
@@ -192,11 +172,11 @@ class DashboardService:
         """
         today = timezone.now().date()
 
-        received = BookingOffer.objects.filter(recipient=user).select_related(
-            "requester", "recipient", "artist"
+        received = BookingOffer.objects.filter(target_user=user).select_related(
+            "requester", "target_user"
         )
         sent = BookingOffer.objects.filter(requester=user).select_related(
-            "requester", "recipient", "artist"
+            "requester", "target_user"
         )
 
         pending = received.filter(status=BookingOffer.Status.PENDING)

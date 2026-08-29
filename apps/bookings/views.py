@@ -5,6 +5,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from apps.accounts.models import User
 from apps.accounts.serializers import UserSerializer
@@ -106,6 +107,15 @@ class BookingOfferListCreateView(APIView):
     # Bookings-screen tabs. None/omitted -> all received offers.
     ALLOWED_STATUS = {"pending", "confirmed", "past"}
 
+    @extend_schema(
+        summary="List booking offers",
+        description="Retrieve a paginated list of booking offers (sent or received).",
+        parameters=[
+            OpenApiParameter(name="scope", type=str, description="Scope of offers (received/sent). Default: received", required=False),
+            OpenApiParameter(name="status", type=str, description="Filter received offers by status (pending/confirmed/past)", required=False)
+        ],
+        responses={200: BookingOfferSerializer(many=True)}
+    )
     def get(self, request):
         scope = request.query_params.get("scope", "received")
         if scope == "sent":
@@ -121,14 +131,20 @@ class BookingOfferListCreateView(APIView):
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(BookingOfferSerializer(page, many=True).data)
 
+    @extend_schema(
+        summary="Create a booking offer",
+        description="Create a new booking request targeting a specific user ID or an email address.",
+        request=BookingOfferCreateSerializer,
+        responses={201: BookingOfferSerializer}
+    )
     def post(self, request):
         serializer = BookingOfferCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        artist_id = data.pop("artist_id")
-        recipient_id = data.pop("recipient_id")
+        target_user_id = data.pop("target_user_id", None)
+        target_email = data.pop("target_email", "")
         offer = BookingService.create_offer(
-            requester=request.user, artist_id=artist_id, recipient_id=recipient_id, **data
+            requester=request.user, target_user_id=target_user_id, target_email=target_email, **data
         )
         return Response(
             {"success": True, "offer": BookingOfferSerializer(offer).data, "message": "Booking request sent."},
@@ -139,8 +155,14 @@ class BookingOfferListCreateView(APIView):
 class BookingOfferAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Accept a booking offer",
+        description="Accept a pending booking offer targeting the authenticated user.",
+        request=None,
+        responses={200: BookingOfferSerializer}
+    )
     def post(self, request, offer_id: int):
-        offer = BookingService.accept(recipient=request.user, offer_id=offer_id)
+        offer = BookingService.accept(target_user=request.user, offer_id=offer_id)
         return Response(
             {"success": True, "offer": BookingOfferSerializer(offer).data},
             status=status.HTTP_200_OK,
@@ -150,8 +172,14 @@ class BookingOfferAcceptView(APIView):
 class BookingOfferRejectView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Reject a booking offer",
+        description="Reject a pending booking offer targeting the authenticated user.",
+        request=None,
+        responses={200: BookingOfferSerializer}
+    )
     def post(self, request, offer_id: int):
-        offer = BookingService.reject(recipient=request.user, offer_id=offer_id)
+        offer = BookingService.reject(target_user=request.user, offer_id=offer_id)
         return Response(
             {"success": True, "offer": BookingOfferSerializer(offer).data},
             status=status.HTTP_200_OK,
