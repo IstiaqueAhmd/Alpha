@@ -217,33 +217,12 @@ class ActivityFeedView(APIView):
 
 
 class SendToUsersView(APIView):
-    """GET /bookings/send-to/ — list users eligible to receive a booking offer.
-
-    Query params:
-        role  – optional, one of "venue" or "talent-buyer". Omit to return both.
-    """
 
     permission_classes = [IsAuthenticated]
     pagination_class = StandardPagination
-    ALLOWED_ROLES = {User.Role.VENUE, User.Role.TALENT_BUYER}
 
     def get(self, request):
-        qs = User.objects.filter(is_active=True, role__in=self.ALLOWED_ROLES).order_by("name")
-
-        role_filter = request.query_params.get("role")
-        if role_filter:
-            if role_filter not in {r.value for r in self.ALLOWED_ROLES}:
-                return Response(
-                    {
-                        "success": False,
-                        "error": {
-                            "code": "invalid_role",
-                            "message": f"Invalid role filter. Choose one of: venue, talent-buyer.",
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            qs = qs.filter(role=role_filter)
+        qs = User.objects.filter(is_active=True).order_by("name")
 
         search = request.query_params.get("search")
         if search:
