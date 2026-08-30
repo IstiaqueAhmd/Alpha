@@ -150,7 +150,7 @@ class RelatedUserSearchView(GenericAPIView):
         qs = TeamService.search_related_users(request.user, search=search_term)
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(TeamUserSerializer(page, many=True).data)
+        return paginator.get_paginated_response(TeamUserSerializer(page, many=True, context={"request": request}).data)
 
 
 class RelatedArtistSearchView(GenericAPIView):
@@ -165,7 +165,7 @@ class RelatedArtistSearchView(GenericAPIView):
         qs = TeamService.search_related_artists(request.user, search=search_term)
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(TeamUserSerializer(page, many=True).data)
+        return paginator.get_paginated_response(TeamUserSerializer(page, many=True, context={"request": request}).data)
 
 
 class PublicUserSearchView(GenericAPIView):
@@ -179,7 +179,7 @@ class PublicUserSearchView(GenericAPIView):
         qs = TeamService.search_all_users(email=request.query_params.get("email"))
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
-        return paginator.get_paginated_response(TeamUserSerializer(page, many=True).data)
+        return paginator.get_paginated_response(TeamUserSerializer(page, many=True, context={"request": request}).data)
 
 
 class PublicTeamSearchView(GenericAPIView):

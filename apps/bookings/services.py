@@ -121,33 +121,21 @@ class BookingService:
 
     @staticmethod
     def list_received(target_user: User, *, status_filter: str | None = None) -> QuerySet[BookingOffer]:
-        """Offers received by a talent-buyer, filtered to one Bookings tab.
-
-        Tabs map to status_filter:
-          - "pending"   -> Pending Offers   (awaiting accept/reject)
-          - "confirmed" -> Confirmed Bookings (accepted, event still ahead)
-          - "past"      -> Past Events       (settled, event already happened)
-        """
-        today = timezone.now().date()
         qs = BookingOffer.objects.select_related(
             "requester", "target_user"
         ).filter(target_user=target_user)
-        if status_filter == "pending":
-            qs = qs.filter(status=BookingOffer.Status.PENDING)
-        elif status_filter == "confirmed":
-            qs = qs.filter(status=BookingOffer.Status.ACCEPTED, event_date__gte=today)
-        elif status_filter == "past":
-            qs = qs.filter(
-                status__in=[BookingOffer.Status.ACCEPTED, BookingOffer.Status.COMPLETED],
-                event_date__lt=today,
-            )
+        if status_filter:
+            qs = qs.filter(status=status_filter)
         return qs
 
     @staticmethod
-    def list_for_requester(user: User) -> QuerySet[BookingOffer]:
-        return BookingOffer.objects.select_related(
+    def list_for_requester(user: User, *, status_filter: str | None = None) -> QuerySet[BookingOffer]:
+        qs = BookingOffer.objects.select_related(
             "requester", "target_user"
         ).filter(requester=user)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
 
     @staticmethod
     def _get_owned_offer(target_user: User, offer_id: int) -> BookingOffer:

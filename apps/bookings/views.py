@@ -104,27 +104,29 @@ class InvalidStatusFilter(ValidationError):
 class BookingOfferListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = StandardPagination
-    # Bookings-screen tabs. None/omitted -> all received offers.
-    ALLOWED_STATUS = {"pending", "confirmed", "past"}
+    ALLOWED_STATUS = {"pending", "accepted", "rejected"}
 
     @extend_schema(
         summary="List booking offers",
         description="Retrieve a paginated list of booking offers (sent or received).",
         parameters=[
             OpenApiParameter(name="scope", type=str, description="Scope of offers (received/sent). Default: received", required=False),
-            OpenApiParameter(name="status", type=str, description="Filter received offers by status (pending/confirmed/past)", required=False)
+            OpenApiParameter(name="status", type=str, description="Filter offers by status (pending/accepted/rejected)", required=False)
         ],
         responses={200: BookingOfferSerializer(many=True)}
     )
     def get(self, request):
         scope = request.query_params.get("scope", "received")
+        status_filter = request.query_params.get("status")
+
+        if status_filter and status_filter not in self.ALLOWED_STATUS:
+            raise ValidationError({"status": "Invalid status. Must be one of: " + ", ".join(self.ALLOWED_STATUS)})
+
         if scope == "sent":
-            qs = BookingService.list_for_requester(request.user)
+            qs = BookingService.list_for_requester(request.user, status_filter=status_filter)
         else:
-            status_filter = request.query_params.get("status")
-            if status_filter and status_filter not in self.ALLOWED_STATUS:
-                raise InvalidStatusFilter()
             qs = BookingService.list_received(request.user, status_filter=status_filter)
+        
         qs = qs.order_by("-created_at")
 
         paginator = self.pagination_class()
