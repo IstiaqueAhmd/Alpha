@@ -553,7 +553,7 @@ class ApprovalService:
         """
         qs = TeamMembership.objects.select_related("user", "team", "invited_by", "approved_by")
         qs = qs.filter(status=status if status else ApprovalStatus.PENDING)
-        return qs.order_by("created_at")
+        return qs.order_by("-created_at")
 
     @staticmethod
     def get_membership(membership_id: int) -> TeamMembership:
