@@ -1,12 +1,17 @@
-from django.db import transaction
-from django.db.models import Count, Q, QuerySet
+from django.db import IntegrityError, transaction
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.accounts.models import User
 from apps.bookings.models import Activity
 
-from .models import Conversation, Message, MessageAttachment
+from .events import broadcast_to_users
+from .models import Conversation, ConversationMember, Message, MessageAttachment
+from .serializers import ConversationSerializer, MessageSerializer, UserSerializer
+from .validators import is_image, validate_attachment
+
+Role = ConversationMember.Role
 
 
 class ConversationService:
@@ -14,48 +19,214 @@ class ConversationService:
     def list_for(user: User, *, query: str | None = None) -> QuerySet[Conversation]:
         qs = (
             Conversation.objects
-            .filter(participants=user)
-            .prefetch_related("participants", "messages")
+            .filter(memberships__user=user)
+            .prefetch_related("memberships__user", "last_message__sender", "last_message__attachments")
             .order_by("-last_message_at", "-created_at")
         )
         if query:
-            qs = qs.filter(participants__name__icontains=query).distinct()
-        return qs
+            qs = qs.filter(
+                Q(name__icontains=query) | Q(memberships__user__name__icontains=query)
+            )
+        return qs.distinct()
+
+    @staticmethod
+    def _membership(conversation: Conversation, user_id: int) -> ConversationMember | None:
+        """Reads from `conversation.memberships`' prefetch cache when one is
+        loaded (the normal case - views always resolve the conversation via
+        `get_for_viewer` first), falling back to a query otherwise.
+        """
+        return next((m for m in conversation.memberships.all() if m.user_id == user_id), None)
 
     @classmethod
-    def get_or_create_with(cls, *, viewer: User, other_user_id: int) -> Conversation:
+    def _require_role(cls, conversation: Conversation, user: User, allowed_roles: set) -> ConversationMember:
+        membership = cls._membership(conversation, user.pk)
+        if not membership:
+            raise PermissionDenied("Not a participant in this conversation.")
+        if membership.role not in allowed_roles:
+            raise PermissionDenied("You do not have permission to do this.")
+        return membership
+
+    @classmethod
+    @transaction.atomic
+    def get_or_create_direct(cls, *, viewer: User, other_user_id: int) -> tuple[Conversation, bool]:
         if viewer.pk == other_user_id:
             raise ValidationError("Cannot start a conversation with yourself.")
         other = User.objects.filter(pk=other_user_id, is_active=True).first()
         if not other:
             raise NotFound("User not found.")
 
-        existing = (
-            Conversation.objects
-            .annotate(participant_count=Count("participants"))
-            .filter(participants=viewer)
-            .filter(participants=other)
-            .filter(participant_count=2)
-            .first()
-        )
+        direct_key = Conversation.direct_key_for(viewer.pk, other_user_id)
+        existing = Conversation.objects.filter(direct_key=direct_key).first()
         if existing:
-            return existing
+            return existing, False
 
-        conversation = Conversation.objects.create()
-        conversation.participants.add(viewer, other)
+        try:
+            with transaction.atomic():
+                conversation = Conversation.objects.create(
+                    is_group=False, direct_key=direct_key, created_by=viewer,
+                )
+                ConversationMember.objects.bulk_create([
+                    ConversationMember(conversation=conversation, user=viewer, role=Role.MEMBER),
+                    ConversationMember(conversation=conversation, user=other, role=Role.MEMBER),
+                ])
+        except IntegrityError:
+            # Lost a race against a concurrent request creating the same pair.
+            return Conversation.objects.get(direct_key=direct_key), False
+
+        conversation = cls.get_for_viewer(viewer, conversation.pk)
+        broadcast_to_users([viewer.pk, other.pk], "conversation.created", ConversationSerializer(conversation).data)
+        return conversation, True
+
+    @classmethod
+    @transaction.atomic
+    def create_group(cls, *, viewer: User, name: str, member_ids: list[int]) -> Conversation:
+        member_ids = {mid for mid in member_ids if mid != viewer.pk}
+        members = list(User.objects.filter(pk__in=member_ids, is_active=True))
+        if not members:
+            raise ValidationError("Add at least one other member.")
+
+        conversation = Conversation.objects.create(is_group=True, name=name.strip(), created_by=viewer)
+        ConversationMember.objects.bulk_create(
+            [ConversationMember(conversation=conversation, user=viewer, role=Role.OWNER)]
+            + [ConversationMember(conversation=conversation, user=u, role=Role.MEMBER) for u in members]
+        )
+
+        conversation = cls.get_for_viewer(viewer, conversation.pk)
+        all_ids = [viewer.pk] + [u.pk for u in members]
+        broadcast_to_users(all_ids, "conversation.created", ConversationSerializer(conversation).data)
         return conversation
 
     @staticmethod
     def get_for_viewer(viewer: User, conversation_id: int) -> Conversation:
         conversation = (
             Conversation.objects
-            .prefetch_related("participants")
-            .filter(pk=conversation_id, participants=viewer)
+            .prefetch_related("memberships__user", "last_message__sender", "last_message__attachments")
+            .filter(pk=conversation_id, memberships__user=viewer)
             .first()
         )
         if not conversation:
             raise NotFound("Conversation not found.")
         return conversation
+
+    @classmethod
+    @transaction.atomic
+    def rename(cls, *, viewer: User, conversation: Conversation, name: str) -> Conversation:
+        if not conversation.is_group:
+            raise ValidationError("Only group conversations can be renamed.")
+        cls._require_role(conversation, viewer, {Role.OWNER, Role.ADMIN})
+
+        conversation.name = name.strip()
+        conversation.save(update_fields=["name", "updated_at"])
+
+        member_ids = [m.user_id for m in conversation.memberships.all()]
+        broadcast_to_users(member_ids, "conversation.updated", ConversationSerializer(conversation).data)
+        return conversation
+
+    @classmethod
+    @transaction.atomic
+    def add_members(cls, *, viewer: User, conversation: Conversation, member_ids: list[int]) -> Conversation:
+        if not conversation.is_group:
+            raise ValidationError("Only group conversations support adding members.")
+        cls._require_role(conversation, viewer, {Role.OWNER, Role.ADMIN})
+
+        existing_ids = {m.user_id for m in conversation.memberships.all()}
+        candidate_ids = {mid for mid in member_ids if mid not in existing_ids}
+        new_users = list(User.objects.filter(pk__in=candidate_ids, is_active=True))
+        if not new_users:
+            raise ValidationError("No new users to add - check the member ids.")
+
+        ConversationMember.objects.bulk_create(
+            [ConversationMember(conversation=conversation, user=u, role=Role.MEMBER) for u in new_users]
+        )
+
+        conversation = cls.get_for_viewer(viewer, conversation.pk)
+        payload = ConversationSerializer(conversation).data
+        all_member_ids = [m.user_id for m in conversation.memberships.all()]
+
+        for user in new_users:
+            broadcast_to_users(
+                all_member_ids, "member.added",
+                {"conversation_id": conversation.pk, "user": UserSerializer(user).data, "role": Role.MEMBER},
+            )
+        broadcast_to_users([u.pk for u in new_users], "conversation.created", payload)
+        return conversation
+
+    @classmethod
+    @transaction.atomic
+    def remove_member(cls, *, viewer: User, conversation: Conversation, target_user_id: int) -> Conversation | None:
+        if not conversation.is_group:
+            raise ValidationError("Only group conversations support removing members.")
+        if target_user_id == viewer.pk:
+            raise ValidationError("Use the leave endpoint to remove yourself.")
+
+        actor_membership = cls._require_role(conversation, viewer, {Role.OWNER, Role.ADMIN})
+        target_membership = cls._membership(conversation, target_user_id)
+        if not target_membership:
+            raise NotFound("That user is not a member of this conversation.")
+        if target_membership.role == Role.OWNER:
+            raise PermissionDenied("The owner cannot be removed.")
+        if actor_membership.role == Role.ADMIN and target_membership.role != Role.MEMBER:
+            raise PermissionDenied("Admins can only remove regular members.")
+
+        target_membership.delete()
+        remaining_ids = [m.user_id for m in conversation.memberships.all() if m.user_id != target_user_id]
+        payload = {"conversation_id": conversation.pk, "user_id": target_user_id}
+
+        if not remaining_ids:
+            conversation.delete()
+            broadcast_to_users([target_user_id], "member.removed", payload)
+            return None
+
+        broadcast_to_users(remaining_ids + [target_user_id], "member.removed", payload)
+        return conversation
+
+    @classmethod
+    @transaction.atomic
+    def leave(cls, *, viewer: User, conversation: Conversation) -> None:
+        if not conversation.is_group:
+            raise ValidationError("Direct conversations can't be left.")
+
+        membership = cls._membership(conversation, viewer.pk)
+        if not membership:
+            raise PermissionDenied("Not a participant in this conversation.")
+
+        other_memberships = [m for m in conversation.memberships.all() if m.user_id != viewer.pk]
+
+        if membership.role == Role.OWNER and other_memberships:
+            successor = (
+                min((m for m in other_memberships if m.role == Role.ADMIN), key=lambda m: m.created_at, default=None)
+                or min(other_memberships, key=lambda m: m.created_at)
+            )
+            successor.role = Role.OWNER
+            successor.save(update_fields=["role", "updated_at"])
+
+        membership.delete()
+
+        if not other_memberships:
+            conversation.delete()
+            return
+
+        remaining_ids = [m.user_id for m in other_memberships]
+        broadcast_to_users(remaining_ids, "member.left", {"conversation_id": conversation.pk, "user_id": viewer.pk})
+
+    @classmethod
+    def mark_read(cls, *, viewer: User, conversation: Conversation) -> int | None:
+        membership = cls._membership(conversation, viewer.pk)
+        if not membership:
+            raise PermissionDenied("Not a participant in this conversation.")
+
+        latest_id = conversation.messages.order_by("-id").values_list("id", flat=True).first()
+        if latest_id and (not membership.last_read_message_id or latest_id > membership.last_read_message_id):
+            membership.last_read_message_id = latest_id
+            membership.save(update_fields=["last_read_message", "updated_at"])
+
+        member_ids = [m.user_id for m in conversation.memberships.all()]
+        broadcast_to_users(member_ids, "conversation.read", {
+            "conversation_id": conversation.pk,
+            "user_id": viewer.pk,
+            "last_read_message_id": membership.last_read_message_id,
+        })
+        return membership.last_read_message_id
 
 
 class MessageService:
@@ -68,60 +239,121 @@ class MessageService:
         conversation: Conversation,
         body: str = "",
         files=None,
+        reply_to_id: int | None = None,
     ) -> Message:
-        if viewer not in conversation.participants.all():
+        membership = ConversationService._membership(conversation, viewer.pk)
+        if not membership:
             raise PermissionDenied("Not a participant in this conversation.")
-
-        message = Message.objects.create(conversation=conversation, sender=viewer, body=body or "")
 
         files = files or []
         for upload in files:
-            kind = (
-                MessageAttachment.Kind.IMAGE
-                if (getattr(upload, "content_type", "") or "").startswith("image/")
-                else MessageAttachment.Kind.FILE
-            )
+            validate_attachment(upload)
+
+        reply_to = None
+        if reply_to_id:
+            reply_to = conversation.messages.filter(pk=reply_to_id).first()
+            if not reply_to:
+                raise ValidationError("reply_to_id does not reference a message in this conversation.")
+
+        message = Message.objects.create(
+            conversation=conversation, sender=viewer, body=body or "", reply_to=reply_to,
+        )
+        for upload in files:
             MessageAttachment.objects.create(
                 message=message,
-                kind=kind,
+                kind=MessageAttachment.Kind.IMAGE if is_image(upload) else MessageAttachment.Kind.FILE,
                 file=upload,
-                name=getattr(upload, "name", "")[:255],
+                name=(getattr(upload, "name", "") or "")[:255],
                 size_bytes=getattr(upload, "size", 0) or 0,
                 content_type=getattr(upload, "content_type", "") or "",
             )
 
+        conversation.last_message = message
         conversation.last_message_at = message.created_at
-        conversation.save(update_fields=["last_message_at", "updated_at"])
+        conversation.save(update_fields=["last_message", "last_message_at", "updated_at"])
 
-        for participant in conversation.participants.exclude(pk=viewer.pk):
+        # Sending implicitly marks read for the sender (no unread badge on your own message).
+        membership.last_read_message = message
+        membership.save(update_fields=["last_read_message", "updated_at"])
+
+        other_member_ids = [m.user_id for m in conversation.memberships.all() if m.user_id != viewer.pk]
+        for uid in other_member_ids:
             Activity.objects.create(
-                user=participant,
+                user_id=uid,
                 verb=Activity.Verb.MESSAGE_RECEIVED,
                 summary="Message received",
                 detail=f"From {viewer.name or viewer.email}",
                 metadata={"conversation_id": conversation.pk, "message_id": message.pk},
             )
+
+        broadcast_to_users(other_member_ids + [viewer.pk], "message.created", MessageSerializer(message).data)
+        return message
+
+    @staticmethod
+    def get_for_viewer(viewer: User, message_id: int) -> Message:
+        message = (
+            Message.objects
+            .select_related("sender", "reply_to__sender", "conversation")
+            .prefetch_related("attachments", "conversation__memberships")
+            .filter(pk=message_id)
+            .first()
+        )
+        if not message:
+            raise NotFound("Message not found.")
+        if not ConversationService._membership(message.conversation, viewer.pk):
+            raise PermissionDenied("Not a participant in this conversation.")
+        return message
+
+    @staticmethod
+    @transaction.atomic
+    def edit(*, viewer: User, message: Message, body: str) -> Message:
+        if message.sender_id != viewer.pk:
+            raise PermissionDenied("You can only edit your own messages.")
+        if message.is_deleted:
+            raise ValidationError("Cannot edit a deleted message.")
+
+        message.body = body
+        message.is_edited = True
+        message.edited_at = timezone.now()
+        message.save(update_fields=["body", "is_edited", "edited_at", "updated_at"])
+
+        member_ids = [m.user_id for m in message.conversation.memberships.all()]
+        broadcast_to_users(member_ids, "message.updated", MessageSerializer(message).data)
+        return message
+
+    @staticmethod
+    @transaction.atomic
+    def delete(*, viewer: User, message: Message) -> Message:
+        if message.sender_id != viewer.pk:
+            raise PermissionDenied("You can only delete your own messages.")
+        if message.is_deleted:
+            return message
+
+        for attachment in message.attachments.all():
+            attachment.file.delete(save=False)
+            attachment.delete()
+
+        message.body = ""
+        message.is_deleted = True
+        message.deleted_at = timezone.now()
+        message.save(update_fields=["body", "is_deleted", "deleted_at", "updated_at"])
+
+        member_ids = [m.user_id for m in message.conversation.memberships.all()]
+        broadcast_to_users(member_ids, "message.deleted", {
+            "conversation_id": message.conversation_id,
+            "message_id": message.pk,
+            "deleted_at": message.deleted_at.isoformat(),
+        })
         return message
 
     @staticmethod
     def list_for_conversation(viewer: User, conversation: Conversation) -> QuerySet[Message]:
-        if viewer not in conversation.participants.all():
+        if not ConversationService._membership(conversation, viewer.pk):
             raise PermissionDenied("Not a participant in this conversation.")
         return (
             Message.objects
-            .select_related("sender")
+            .select_related("sender", "reply_to__sender")
             .prefetch_related("attachments")
             .filter(conversation=conversation)
             .order_by("-created_at")
-        )
-
-    @staticmethod
-    def mark_read(viewer: User, conversation: Conversation) -> int:
-        if viewer not in conversation.participants.all():
-            raise PermissionDenied("Not a participant in this conversation.")
-        return (
-            Message.objects
-            .filter(conversation=conversation, read_at__isnull=True)
-            .exclude(sender=viewer)
-            .update(read_at=timezone.now())
         )

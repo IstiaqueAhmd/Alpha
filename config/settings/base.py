@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
+    "channels",
     "apps.common",
     "apps.accounts",
     "apps.catalog",
@@ -185,6 +186,19 @@ CORS_ALLOW_CREDENTIALS = True
 # config/settings/base.py
 GOOGLE_OAUTH_CLIENT_ID = env("GOOGLE_OAUTH_CLIENT_ID", default="")
 GOOGLE_OAUTH_CLIENT_SECRET = env("GOOGLE_OAUTH_CLIENT_SECRET", default="")
+
+# Chat (apps.messaging): real-time transport + presence tracking.
+# In-memory by default so the app works locally with no extra
+# infrastructure. Once Redis is available, override in prod.py:
+#   CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": [REDIS_URL]}}}
+#   CHAT_PRESENCE_BACKEND = "redis"
+#   CHAT_PRESENCE_REDIS_URL = REDIS_URL
+# (needed for correctness once more than one worker process is serving
+# WebSocket connections - an in-memory layer/counter is process-local.)
+CHANNEL_LAYERS = {
+    "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+}
+CHAT_PRESENCE_BACKEND = "memory"
 
 LOGGING = {
     "version": 1,

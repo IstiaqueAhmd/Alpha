@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import Conversation, Message, MessageAttachment
+from .models import Conversation, ConversationMember, Message, MessageAttachment
+
+
+class ConversationMemberInline(admin.TabularInline):
+    model = ConversationMember
+    extra = 0
+    autocomplete_fields = ("user",)
 
 
 class MessageAttachmentInline(admin.TabularInline):
@@ -11,16 +17,18 @@ class MessageAttachmentInline(admin.TabularInline):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ("id", "last_message_at", "created_at")
-    search_fields = ("id", "participants__email", "participants__name")
-    filter_horizontal = ("participants",)
+    list_display = ("id", "is_group", "name", "last_message_at", "created_at")
+    list_filter = ("is_group",)
+    search_fields = ("id", "name", "memberships__user__email", "memberships__user__name")
+    inlines = [ConversationMemberInline]
 
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("id", "conversation", "sender", "read_at", "created_at")
+    list_display = ("id", "conversation", "sender", "is_edited", "is_deleted", "created_at")
+    list_filter = ("is_edited", "is_deleted")
     search_fields = ("body", "sender__email")
-    autocomplete_fields = ("sender", "conversation")
+    autocomplete_fields = ("sender", "conversation", "reply_to")
     readonly_fields = ("created_at", "updated_at")
     inlines = [MessageAttachmentInline]
 
