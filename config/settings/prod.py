@@ -14,12 +14,27 @@ CACHES = {
         "LOCATION": env("REDIS_URL"),
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            # A Redis hiccup should degrade (throttling briefly off) rather
+            # than 500 every request that touches the cache.
+            "IGNORE_EXCEPTIONS": True,
         },
     }
 }
 
 # Use cache-backed throttling in prod so worker processes share the rate-limit state.
 REST_FRAMEWORK["DEFAULT_THROTTLE_CACHE"] = "default"
+
+# Chat (apps.messaging) real-time transport + presence - in-memory in base.py
+# is process-local and wrong once more than one worker process serves
+# WebSocket connections, so prod always uses Redis.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [env("REDIS_URL")]},
+    },
+}
+CHAT_PRESENCE_BACKEND = "redis"
+CHAT_PRESENCE_REDIS_URL = env("REDIS_URL")
 
 # Security
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
