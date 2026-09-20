@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from apps.inquiries.models import Inquiry
+from apps.messaging.services import ConversationService, MessageService
 from apps.notifications.services import NotificationService
 from apps.teams.models import ApprovalStatus, Team, TeamMembership
 from apps.teams.services import TeamService
@@ -100,6 +101,7 @@ class OfferService:
         sender: User,
         inquiry_id: int | None = None,
         receiver_id: int | None = None,
+        conversation_id: int | None = None,
         signature=None,
         files: list | None = None,
         user_ids: list[int] | None = None,
@@ -120,6 +122,13 @@ class OfferService:
 
         `user_ids`/`team_ids` are optional initial shares - equivalent to calling `share()`
         right after creation, just folded into the same transaction.
+
+        `conversation_id` is an optional, additive hook so the "Add offer" action in a DM
+        can use this exact same endpoint/flow: nothing about offer creation changes, this
+        just also drops a chat bubble (kind=OFFER) into that conversation pointing at the
+        new offer. The conversation must be a direct one the sender is in, and its other
+        participant must be the offer's receiver - it can't be used to route an offer to
+        someone who isn't actually the resolved receiver.
         """
         inquiry = None
         if inquiry_id is not None:
@@ -142,6 +151,14 @@ class OfferService:
             if receiver.pk == sender.pk:
                 raise ValidationError("Cannot send an offer to yourself.")
 
+        conversation = None
+        if conversation_id is not None:
+            conversation, other_user_id = ConversationService.get_dm_for_offer(
+                sender=sender, conversation_id=conversation_id
+            )
+            if other_user_id != receiver.pk:
+                raise ValidationError("conversation_id does not match this offer's receiver.")
+
         offer = Offer.objects.create(
             inquiry=inquiry,
             sender=sender,
@@ -157,6 +174,9 @@ class OfferService:
 
         if user_ids or team_ids:
             cls._apply_share(offer=offer, actor=sender, user_ids=user_ids or [], team_ids=team_ids or [])
+
+        if conversation is not None:
+            MessageService.create_offer_message(conversation=conversation, sender=sender, offer=offer)
 
         NotificationService.notify(
             recipient=offer.receiver,

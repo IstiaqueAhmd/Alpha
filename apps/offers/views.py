@@ -82,8 +82,13 @@ class OfferListCreateView(generics.ListCreateAPIView):
         data = dict(serializer.validated_data)
         inquiry_id = data.pop("inquiry_id", None)
         receiver_id = data.pop("receiver_id", None)
+        conversation_id = data.pop("conversation_id", None)
         offer = OfferService.create(
-            sender=request.user, inquiry_id=inquiry_id, receiver_id=receiver_id, **data
+            sender=request.user,
+            inquiry_id=inquiry_id,
+            receiver_id=receiver_id,
+            conversation_id=conversation_id,
+            **data,
         )
         return Response(
             {"success": True, "offer": OfferSerializer(offer).data},

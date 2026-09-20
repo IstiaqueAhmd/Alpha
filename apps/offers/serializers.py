@@ -96,6 +96,10 @@ class OfferSerializer(serializers.ModelSerializer):
 class OfferCreateSerializer(serializers.ModelSerializer):
     inquiry_id = serializers.IntegerField(required=False)
     receiver_id = serializers.IntegerField(required=False)
+    conversation_id = serializers.IntegerField(
+        required=False,
+        help_text="Post this offer into an existing direct conversation as a chat bubble.",
+    )
     signature = serializers.ImageField(required=False)
     files = serializers.ListField(
         child=serializers.FileField(),
@@ -108,7 +112,10 @@ class OfferCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Offer
-        fields = ("inquiry_id", "receiver_id", "signature", "files", "user_ids", "team_ids", *CONTRACT_FIELDS)
+        fields = (
+            "inquiry_id", "receiver_id", "conversation_id", "signature", "files", "user_ids", "team_ids",
+            *CONTRACT_FIELDS,
+        )
 
     def validate(self, attrs):
         if not attrs.get("inquiry_id") and not attrs.get("receiver_id"):

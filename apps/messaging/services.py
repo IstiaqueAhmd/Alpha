@@ -14,6 +14,53 @@ from .validators import is_image, validate_attachment
 Role = ConversationMember.Role
 
 
+def _user_snapshot(user: User) -> dict:
+    """Name/email as of the event, not a live reference - a later rename
+    shouldn't rewrite what a system message said at the time.
+    """
+    return {"id": user.pk, "name": user.name, "email": user.email}
+
+
+def _system_message_body(event: str, actor: User, target: User | None) -> str:
+    actor_name = actor.name or actor.email
+    target_name = (target.name or target.email) if target else None
+    if event == "member_added":
+        return f"{actor_name} added {target_name}"
+    if event == "member_removed":
+        return f"{actor_name} removed {target_name}"
+    if event == "member_left":
+        return f"{actor_name} left the group"
+    if event == "member_joined":
+        return f"{actor_name} joined the group"
+    if event == "member_removed_from_team":
+        return f"{actor_name} was removed from the group"
+    return event
+
+
+def _write_system_message(*, conversation: Conversation, actor: User, event: str, target: User | None = None) -> Message:
+    """Post a kind=SYSTEM message recording a membership event (added/removed/
+    left/joined) - `body` is a plain-English fallback, `system_event` carries
+    structured actor/target snapshots for clients that want to render their own
+    UI (avatars, i18n, etc). No unread/Activity bookkeeping here - these are
+    informational, not something an inbox badge should count.
+    """
+    message = Message.objects.create(
+        conversation=conversation,
+        sender=actor,
+        kind=Message.Kind.SYSTEM,
+        body=_system_message_body(event, actor, target),
+        system_event={
+            "event": event,
+            "actor": _user_snapshot(actor),
+            "target": _user_snapshot(target) if target else None,
+        },
+    )
+    conversation.last_message = message
+    conversation.last_message_at = message.created_at
+    conversation.save(update_fields=["last_message", "last_message_at", "updated_at"])
+    return message
+
+
 class ConversationService:
     @staticmethod
     def list_for(user: User, *, query: str | None = None) -> QuerySet[Conversation]:
@@ -161,7 +208,6 @@ class ConversationService:
         )
 
         conversation = cls.get_for_viewer(viewer, conversation.pk)
-        payload = ConversationSerializer(conversation).data
         all_member_ids = [m.user_id for m in conversation.memberships.all()]
 
         for user in new_users:
@@ -169,7 +215,12 @@ class ConversationService:
                 all_member_ids, "member.added",
                 {"conversation_id": conversation.pk, "user": UserSerializer(user).data, "role": Role.MEMBER},
             )
-        broadcast_to_users([u.pk for u in new_users], "conversation.created", payload)
+            system_message = _write_system_message(
+                conversation=conversation, actor=viewer, event="member_added", target=user,
+            )
+            broadcast_to_users(all_member_ids, "message.created", MessageSerializer(system_message).data)
+
+        broadcast_to_users([u.pk for u in new_users], "conversation.created", ConversationSerializer(conversation).data)
         return conversation
 
     @classmethod
@@ -191,6 +242,7 @@ class ConversationService:
         if actor_membership.role == Role.ADMIN and target_membership.role != Role.MEMBER:
             raise PermissionDenied("Admins can only remove regular members.")
 
+        target_user = target_membership.user
         target_membership.delete()
         remaining_ids = [m.user_id for m in conversation.memberships.all() if m.user_id != target_user_id]
         payload = {"conversation_id": conversation.pk, "user_id": target_user_id}
@@ -201,6 +253,10 @@ class ConversationService:
             return None
 
         broadcast_to_users(remaining_ids + [target_user_id], "member.removed", payload)
+        system_message = _write_system_message(
+            conversation=conversation, actor=viewer, event="member_removed", target=target_user,
+        )
+        broadcast_to_users(remaining_ids, "message.created", MessageSerializer(system_message).data)
         return conversation
 
     @classmethod
@@ -233,6 +289,8 @@ class ConversationService:
 
         remaining_ids = [m.user_id for m in other_memberships]
         broadcast_to_users(remaining_ids, "member.left", {"conversation_id": conversation.pk, "user_id": viewer.pk})
+        system_message = _write_system_message(conversation=conversation, actor=viewer, event="member_left")
+        broadcast_to_users(remaining_ids, "message.created", MessageSerializer(system_message).data)
 
     @classmethod
     def mark_read(cls, *, viewer: User, conversation: Conversation) -> int | None:
@@ -292,6 +350,9 @@ class ConversationService:
         )
         broadcast_to_users([user.pk], "conversation.created", ConversationSerializer(conversation).data)
 
+        system_message = _write_system_message(conversation=conversation, actor=user, event="member_joined")
+        broadcast_to_users(all_member_ids, "message.created", MessageSerializer(system_message).data)
+
     @classmethod
     @transaction.atomic
     def sync_remove_team_member(cls, *, team, user: User) -> None:
@@ -310,6 +371,29 @@ class ConversationService:
             remaining_ids + [user.pk], "member.removed",
             {"conversation_id": conversation.pk, "user_id": user.pk},
         )
+
+        if remaining_ids:
+            system_message = _write_system_message(
+                conversation=conversation, actor=user, event="member_removed_from_team",
+            )
+            broadcast_to_users(remaining_ids, "message.created", MessageSerializer(system_message).data)
+
+    @classmethod
+    def get_dm_for_offer(cls, *, sender: User, conversation_id: int) -> tuple[Conversation, int]:
+        """Resolve a `conversation_id` passed alongside an offer create request.
+
+        Offers can only be sent through a DM, never a group - a chat offer is a
+        two-party negotiation, so `receiver_id` must unambiguously be "the other
+        person in this conversation". Returns the conversation plus that other
+        user's id, for the caller to cross-check against `receiver_id`/`inquiry`.
+        """
+        conversation = cls.get_for_viewer(sender, conversation_id)
+        if conversation.is_group:
+            raise ValidationError("Offers can only be sent in a direct conversation.")
+        other = next((m for m in conversation.memberships.all() if m.user_id != sender.pk), None)
+        if not other:
+            raise ValidationError("This conversation has no other participant to send an offer to.")
+        return conversation, other.user_id
 
 
 class MessageService:
@@ -370,6 +454,45 @@ class MessageService:
             )
 
         broadcast_to_users(other_member_ids + [viewer.pk], "message.created", MessageSerializer(message).data)
+        return message
+
+    @classmethod
+    @transaction.atomic
+    def create_offer_message(cls, *, conversation: Conversation, sender: User, offer) -> Message:
+        """Post `offer` into `conversation` as a chat bubble.
+
+        Called from `apps.offers.services.OfferService.create` right after the
+        offer itself is created - `apps.messaging.services.ConversationService
+        .get_dm_for_offer` has already checked `sender` belongs to this (direct)
+        conversation, so this only does the message-side bookkeeping `send()`
+        does, minus attachments/replies (an offer message carries neither).
+        """
+        membership = ConversationService._membership(conversation, sender.pk)
+        if not membership:
+            raise PermissionDenied("Not a participant in this conversation.")
+
+        message = Message.objects.create(
+            conversation=conversation, sender=sender, kind=Message.Kind.OFFER, offer=offer,
+        )
+
+        conversation.last_message = message
+        conversation.last_message_at = message.created_at
+        conversation.save(update_fields=["last_message", "last_message_at", "updated_at"])
+
+        membership.last_read_message = message
+        membership.save(update_fields=["last_read_message", "updated_at"])
+
+        other_member_ids = [m.user_id for m in conversation.memberships.all() if m.user_id != sender.pk]
+        for uid in other_member_ids:
+            Activity.objects.create(
+                user_id=uid,
+                verb=Activity.Verb.MESSAGE_RECEIVED,
+                summary="Offer received",
+                detail=f"From {sender.name or sender.email}",
+                metadata={"conversation_id": conversation.pk, "message_id": message.pk, "offer_id": offer.pk},
+            )
+
+        broadcast_to_users(other_member_ids + [sender.pk], "message.created", MessageSerializer(message).data)
         return message
 
     @staticmethod

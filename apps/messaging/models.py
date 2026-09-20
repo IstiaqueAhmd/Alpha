@@ -110,6 +110,11 @@ class ConversationMember(TimeStampedModel):
 
 
 class Message(TimeStampedModel):
+    class Kind(models.TextChoices):
+        TEXT = "text", "Text"
+        OFFER = "offer", "Offer"
+        SYSTEM = "system", "System"
+
     conversation = models.ForeignKey(
         Conversation,
         on_delete=models.CASCADE,
@@ -119,6 +124,23 @@ class Message(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="sent_messages",
+    )
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.TEXT)
+    offer = models.OneToOneField(
+        "offers.Offer",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="chat_message",
+    )
+    system_event = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Set only for kind=system: {'event': 'member_added'|'member_removed'|'member_left', "
+            "'actor': {...}, 'target': {...}}. Actor/target are name/email snapshots taken at "
+            "event time, not live user references - a later rename shouldn't rewrite history."
+        ),
     )
     body = models.TextField(blank=True)
     reply_to = models.ForeignKey(
