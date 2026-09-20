@@ -36,6 +36,8 @@ class ArtistRole(models.TextChoices):
     SEGMENT_AGENT = "segment_agent", "Segment Agent"
     TOUR_MANAGER = "tour_manager", "Tour Manager"
     LEGAL_REPRESENTATIVE = "legal_representative", "Legal Representative"
+    SUPERVISOR = "artist_supervisor", "Supervisor"
+    MINI_SUPER_ADMIN = "artist_mini_super_admin", "Mini Super Admin"
 
 
 class VenueRole(models.TextChoices):
@@ -46,6 +48,8 @@ class VenueRole(models.TextChoices):
     MARKETING_DIRECTOR = "marketing_director", "Marketing Director"
     FINANCE_TEAM = "finance_team", "Finance Team"
     LEGAL_TEAM = "legal_team", "Legal Team"
+    SUPERVISOR = "venue_supervisor", "Supervisor"
+    MINI_SUPER_ADMIN = "venue_mini_super_admin", "Mini Super Admin"
 
 
 # role -> rank, per domain. Duplicate ranks are legal and mean "same level".
@@ -60,6 +64,8 @@ ROLE_RANKS: dict[str, dict[str, int]] = {
         ArtistRole.SEGMENT_AGENT.value: 4,
         ArtistRole.TOUR_MANAGER.value: 5,
         ArtistRole.LEGAL_REPRESENTATIVE.value: 6,
+        ArtistRole.SUPERVISOR.value: 7,
+        ArtistRole.MINI_SUPER_ADMIN.value: 8,
     },
     TeamDomain.VENUE.value: {
         VenueRole.CEO_GM.value: 0,
@@ -69,6 +75,8 @@ ROLE_RANKS: dict[str, dict[str, int]] = {
         VenueRole.MARKETING_DIRECTOR.value: 4,
         VenueRole.FINANCE_TEAM.value: 5,
         VenueRole.LEGAL_TEAM.value: 6,
+        VenueRole.SUPERVISOR.value: 7,
+        VenueRole.MINI_SUPER_ADMIN.value: 8,
     },
 }
 

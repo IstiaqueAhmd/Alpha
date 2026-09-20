@@ -13,11 +13,23 @@ class Conversation(TimeStampedModel):
     "start a DM with this person" requests from creating duplicate
     conversations (a plain query-then-create has a race; a unique column
     doesn't). Group conversations never set it.
+
+    `team` is set only for the one auto-managed group per team (every
+    approved member, kept in sync by `apps.teams.services`) - membership on
+    those is system-managed, not editable via the normal add/remove/leave
+    endpoints.
     """
 
     is_group = models.BooleanField(default=False)
     name = models.CharField(max_length=255, blank=True)
     direct_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    team = models.OneToOneField(
+        "teams.Team",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="group_conversation",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

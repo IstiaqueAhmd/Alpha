@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -228,7 +229,8 @@ class SendToUsersView(APIView):
 
         search = request.query_params.get("search")
         if search:
-            qs = qs.filter(name__icontains=search.strip())
+            term = search.strip()
+            qs = qs.filter(Q(name__icontains=term) | Q(email__icontains=term) | Q(phone__icontains=term))
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(UserSerializer(page, many=True).data)

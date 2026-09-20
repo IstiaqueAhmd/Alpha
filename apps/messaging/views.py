@@ -57,6 +57,26 @@ class ConversationListCreateView(GenericAPIView):
         )
 
 
+class TeamConversationView(GenericAPIView):
+    """Look up a team's auto-managed group chat by team id, for a team page
+    that wants to open the chat directly rather than via the conversation
+    list. 404 if the caller isn't an approved member yet, or the team has no
+    approved members at all (the group is created on first approval).
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = ConversationSerializer
+
+    def get(self, request, team_id: int):
+        conversation = ConversationService.get_for_team_viewer(request.user, team_id)
+        return Response(
+            {
+                "success": True,
+                "conversation": ConversationSerializer(conversation, context={"request": request}).data,
+            },
+        )
+
+
 class ConversationDetailView(GenericAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = ConversationSerializer
@@ -216,7 +236,9 @@ class UserSearchView(GenericAPIView):
         search = request.query_params.get("search") or request.query_params.get("q")
         qs = User.objects.filter(is_active=True).exclude(pk=request.user.pk).order_by("name")
         if search:
-            qs = qs.filter(Q(name__icontains=search) | Q(email__icontains=search))
+            qs = qs.filter(
+                Q(name__icontains=search) | Q(email__icontains=search) | Q(phone__icontains=search)
+            )
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(UserSerializer(page, many=True, context={"request": request}).data)

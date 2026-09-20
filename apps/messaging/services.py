@@ -108,11 +108,30 @@ class ConversationService:
             raise NotFound("Conversation not found.")
         return conversation
 
+    @staticmethod
+    def get_for_team_viewer(viewer: User, team_id: int) -> Conversation:
+        """A team's auto-managed group conversation, for a caller who is
+        already one of its members. Same 404-for-everything-else shape as
+        `get_for_viewer` - team not found, no group yet, or viewer not a
+        member all look identical from the outside.
+        """
+        conversation = (
+            Conversation.objects
+            .prefetch_related("memberships__user", "last_message__sender", "last_message__attachments")
+            .filter(team_id=team_id, memberships__user=viewer)
+            .first()
+        )
+        if not conversation:
+            raise NotFound("Team chat not found.")
+        return conversation
+
     @classmethod
     @transaction.atomic
     def rename(cls, *, viewer: User, conversation: Conversation, name: str) -> Conversation:
         if not conversation.is_group:
             raise ValidationError("Only group conversations can be renamed.")
+        if conversation.team_id:
+            raise ValidationError("This group follows its team's name and can't be renamed directly.")
         cls._require_role(conversation, viewer, {Role.OWNER, Role.ADMIN})
 
         conversation.name = name.strip()
@@ -127,6 +146,8 @@ class ConversationService:
     def add_members(cls, *, viewer: User, conversation: Conversation, member_ids: list[int]) -> Conversation:
         if not conversation.is_group:
             raise ValidationError("Only group conversations support adding members.")
+        if conversation.team_id:
+            raise ValidationError("Membership in a team's group follows the team roster and can't be edited directly.")
         cls._require_role(conversation, viewer, {Role.OWNER, Role.ADMIN})
 
         existing_ids = {m.user_id for m in conversation.memberships.all()}
@@ -156,6 +177,8 @@ class ConversationService:
     def remove_member(cls, *, viewer: User, conversation: Conversation, target_user_id: int) -> Conversation | None:
         if not conversation.is_group:
             raise ValidationError("Only group conversations support removing members.")
+        if conversation.team_id:
+            raise ValidationError("Membership in a team's group follows the team roster and can't be edited directly.")
         if target_user_id == viewer.pk:
             raise ValidationError("Use the leave endpoint to remove yourself.")
 
@@ -185,6 +208,8 @@ class ConversationService:
     def leave(cls, *, viewer: User, conversation: Conversation) -> None:
         if not conversation.is_group:
             raise ValidationError("Direct conversations can't be left.")
+        if conversation.team_id:
+            raise ValidationError("You can't leave a team's group directly - leave the team instead.")
 
         membership = cls._membership(conversation, viewer.pk)
         if not membership:
@@ -227,6 +252,64 @@ class ConversationService:
             "last_read_message_id": membership.last_read_message_id,
         })
         return membership.last_read_message_id
+
+    @staticmethod
+    def get_or_create_team_conversation(team) -> Conversation:
+        """The one auto-managed group conversation for `team`, creating it on
+        first use. Called from `apps.teams.services` as members are approved -
+        never from a view, so no permission check applies here.
+        """
+        conversation = Conversation.objects.filter(team=team).first()
+        if conversation:
+            return conversation
+        try:
+            with transaction.atomic():
+                return Conversation.objects.create(
+                    is_group=True, team=team, name=team.name, created_by=team.created_by
+                )
+        except IntegrityError:
+            # Lost a race against a concurrent approval creating the same team's group.
+            return Conversation.objects.get(team=team)
+
+    @classmethod
+    @transaction.atomic
+    def sync_add_team_member(cls, *, team, user: User) -> None:
+        """Add `user` to `team`'s auto-managed group. Idempotent - approving an
+        already-added member (shouldn't happen, but cheap to guard) is a no-op.
+        """
+        conversation = cls.get_or_create_team_conversation(team)
+        _, created = ConversationMember.objects.get_or_create(
+            conversation=conversation, user=user, defaults={"role": Role.MEMBER}
+        )
+        if not created:
+            return
+
+        conversation = cls.get_for_viewer(user, conversation.pk)
+        all_member_ids = [m.user_id for m in conversation.memberships.all()]
+        broadcast_to_users(
+            all_member_ids, "member.added",
+            {"conversation_id": conversation.pk, "user": UserSerializer(user).data, "role": Role.MEMBER},
+        )
+        broadcast_to_users([user.pk], "conversation.created", ConversationSerializer(conversation).data)
+
+    @classmethod
+    @transaction.atomic
+    def sync_remove_team_member(cls, *, team, user: User) -> None:
+        """Remove `user` from `team`'s auto-managed group, if one exists yet."""
+        conversation = Conversation.objects.filter(team=team).first()
+        if not conversation:
+            return
+        deleted, _ = ConversationMember.objects.filter(conversation=conversation, user=user).delete()
+        if not deleted:
+            return
+
+        remaining_ids = [
+            m.user_id for m in conversation.memberships.all() if m.user_id != user.pk
+        ]
+        broadcast_to_users(
+            remaining_ids + [user.pk], "member.removed",
+            {"conversation_id": conversation.pk, "user_id": user.pk},
+        )
 
 
 class MessageService:

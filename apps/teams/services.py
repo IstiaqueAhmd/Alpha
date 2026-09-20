@@ -18,6 +18,8 @@ from .models import (
 from .notifications import notify_invitation_received
 from .roles import ArtistRole, is_valid_role, rank_of
 
+from apps.messaging.services import ConversationService
+
 User = get_user_model()
 
 DEFAULT_INVITATION_TTL_DAYS = 7
@@ -98,7 +100,8 @@ class TeamService:
     def search_related_users(user, search: str | None = None) -> QuerySet[User]:
         """Users who share at least one approved team with `user` - i.e. teammates
         across every team `user` belongs to, regardless of which team. Excludes
-        `user` themselves. `search` filters case-insensitively, substring on name or email.
+        `user` themselves. `search` filters case-insensitively, substring on
+        name, email, or phone.
         """
         my_team_ids = TeamMembership.objects.filter(
             user=user, status=ApprovalStatus.APPROVED
@@ -114,7 +117,9 @@ class TeamService:
             .order_by("name")
         )
         if search:
-            qs = qs.filter(Q(email__icontains=search) | Q(name__icontains=search))
+            qs = qs.filter(
+                Q(email__icontains=search) | Q(name__icontains=search) | Q(phone__icontains=search)
+            )
         return qs
 
     @staticmethod
@@ -137,15 +142,23 @@ class TeamService:
             .order_by("name")
         )
         if search:
-            qs = qs.filter(Q(email__icontains=search) | Q(name__icontains=search))
+            qs = qs.filter(
+                Q(email__icontains=search) | Q(name__icontains=search) | Q(phone__icontains=search)
+            )
         return qs
 
     @staticmethod
-    def search_all_users(email: str | None = None) -> QuerySet[User]:
-        """Platform-wide user search - not scoped to any shared team."""
+    def search_all_users(email: str | None = None, search: str | None = None) -> QuerySet[User]:
+        """Platform-wide user search - not scoped to any shared team.
+
+        `search` filters case-insensitively, substring on name, email, or
+        phone. `email` is kept for backwards compatibility with existing
+        callers that only ever searched by email.
+        """
         qs = User.objects.filter(is_active=True).order_by("name")
-        if email:
-            qs = qs.filter(email__icontains=email)
+        term = search or email
+        if term:
+            qs = qs.filter(Q(email__icontains=term) | Q(name__icontains=term) | Q(phone__icontains=term))
         return qs
 
     @staticmethod
@@ -307,11 +320,17 @@ class TeamService:
         return membership
 
     @staticmethod
+    @transaction.atomic
     def remove_member(*, actor, team: Team, membership_id: int) -> None:
         TeamService.assert_can_manage(actor, team)
-        deleted, _ = TeamMembership.objects.filter(pk=membership_id, team=team).delete()
-        if not deleted:
+        membership = TeamMembership.objects.filter(pk=membership_id, team=team).first()
+        if not membership:
             raise exc.MembershipNotFound()
+        was_approved = membership.status == ApprovalStatus.APPROVED
+        user = membership.user
+        membership.delete()
+        if was_approved:
+            ConversationService.sync_remove_team_member(team=team, user=user)
 
 
 class InvitationService:
@@ -585,4 +604,6 @@ class ApprovalService:
         membership.save(
             update_fields=["status", "approved_by", "approved_at", "review_note", "updated_at"]
         )
+        if approve:
+            ConversationService.sync_add_team_member(team=membership.team, user=membership.user)
         return membership
