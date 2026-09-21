@@ -16,7 +16,7 @@ from .models import (
     TeamMembership,
 )
 from .notifications import notify_invitation_received
-from .roles import ArtistRole, is_valid_role, rank_of
+from .roles import ARTIST_ROLE_REQUIRES_DETAILS, ArtistRole, is_valid_role, rank_of
 
 from apps.messaging.services import ConversationService
 
@@ -301,7 +301,7 @@ class TeamService:
                     status=ApprovalStatus.PENDING,
                     invited_by=actor,
                 )
-                if role == ArtistRole.ARTIST.value:
+                if role == ArtistRole.ARTIST.value and ARTIST_ROLE_REQUIRES_DETAILS:
                     details = ArtistRepresentationDetails.objects.create(
                         membership=membership,
                         agency_roster_url=agency_roster_url,
@@ -377,7 +377,7 @@ class InvitationService:
                     status=TeamInvitation.Status.PENDING,
                     expires_at=timezone.now() + _invitation_ttl(),
                 )
-                if role == ArtistRole.ARTIST.value:
+                if role == ArtistRole.ARTIST.value and ARTIST_ROLE_REQUIRES_DETAILS:
                     details = ArtistRepresentationDetails.objects.create(
                         invitation=invitation,
                         agency_roster_url=agency_roster_url,

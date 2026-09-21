@@ -514,33 +514,10 @@ class ArtistPolymorphicPayloadTests(ApiTestCase):
             status=ApprovalStatus.APPROVED,
         )
 
-    def test_add_artist_with_nested_details_succeeds(self):
-        self.login_as(self.founder)
-        file = SimpleUploadedFile("dummy.pdf", b"file_content", content_type="application/pdf")
-        res = self.client.post(
-            reverse("teams:member-list-create", args=[self.team.id]),
-            data={
-                "user_id": self.other.id,
-                "role": "artist",
-                "details": json.dumps({
-                    "agency_roster_url": "https://example.com/artist",
-                    "confirmation_email": "hello@example.com",
-                    "business_email": "biz@example.com",
-                    "adder_role": "agent",
-                    "representation": "full",
-                }),
-                "documents": file
-            },
-        )
-        self.assertEqual(res.status_code, 201)
-        membership = TeamMembership.objects.get(user=self.other)
-        self.assertEqual(membership.role, "artist")
-        # Ensure details were saved properly
-        details = membership.artist_representation_details
-        self.assertEqual(details.agency_roster_url, "https://example.com/artist")
-        self.assertEqual(details.business_email, "biz@example.com")
-
-    def test_add_artist_without_details_fails_validation(self):
+    def test_add_artist_without_details_succeeds_while_toggle_is_off(self):
+        """ARTIST_ROLE_REQUIRES_DETAILS is off by default - artist is added
+        like any other role, no extra fields required.
+        """
         self.login_as(self.founder)
         res = self.client.post(
             reverse("teams:member-list-create", args=[self.team.id]),
@@ -550,11 +527,66 @@ class ArtistPolymorphicPayloadTests(ApiTestCase):
             },
             content_type="application/json",
         )
-        self.assertEqual(res.status_code, 400)
-        # Should raise error for nested details fields
-        errors = res.json()["error"]["details"]
-        self.assertIn("details", errors)
-        
+        self.assertEqual(res.status_code, 201)
+        membership = TeamMembership.objects.get(user=self.other)
+        self.assertEqual(membership.role, "artist")
+        self.assertIsNone(getattr(membership, "artist_representation_details", None))
+
+    def test_artist_details_are_ignored_while_toggle_is_off(self):
+        """Sending `details` anyway while the toggle is off is harmless - they
+        aren't validated or stored, same as any non-artist role's `details`.
+        """
+        self.login_as(self.founder)
+        res = self.client.post(
+            reverse("teams:member-list-create", args=[self.team.id]),
+            data={
+                "user_id": self.other.id,
+                "role": "artist",
+                "details": json.dumps({"agency_roster_url": "not a url"}),
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        membership = TeamMembership.objects.get(user=self.other)
+        self.assertIsNone(getattr(membership, "artist_representation_details", None))
+
+    def test_artist_requires_details_when_toggle_is_turned_back_on(self):
+        """Flipping ARTIST_ROLE_REQUIRES_DETAILS back to True (its old
+        behaviour) still works end-to-end - the switch itself is exercised,
+        not just its current (off) setting.
+        """
+        self.login_as(self.founder)
+        with mock.patch("apps.teams.serializers.ARTIST_ROLE_REQUIRES_DETAILS", True), \
+             mock.patch("apps.teams.services.ARTIST_ROLE_REQUIRES_DETAILS", True):
+            missing = self.client.post(
+                reverse("teams:member-list-create", args=[self.team.id]),
+                data={"user_id": self.other.id, "role": "artist"},
+                content_type="application/json",
+            )
+            self.assertEqual(missing.status_code, 400)
+
+            file = SimpleUploadedFile("dummy.pdf", b"file_content", content_type="application/pdf")
+            ok = self.client.post(
+                reverse("teams:member-list-create", args=[self.team.id]),
+                data={
+                    "user_id": self.other.id,
+                    "role": "artist",
+                    "details": json.dumps({
+                        "agency_roster_url": "https://example.com/artist",
+                        "confirmation_email": "hello@example.com",
+                        "business_email": "biz@example.com",
+                        "adder_role": "agent",
+                        "representation": "full",
+                    }),
+                    "documents": file,
+                },
+            )
+        self.assertEqual(ok.status_code, 201)
+        membership = TeamMembership.objects.get(user=self.other)
+        details = membership.artist_representation_details
+        self.assertEqual(details.agency_roster_url, "https://example.com/artist")
+        self.assertEqual(details.business_email, "biz@example.com")
+
     def test_add_non_artist_with_documents_succeeds(self):
         self.login_as(self.founder)
         file = SimpleUploadedFile("manager_contract.pdf", b"file_content", content_type="application/pdf")
@@ -571,21 +603,22 @@ class ArtistPolymorphicPayloadTests(ApiTestCase):
         self.assertEqual(membership.role, "manager")
         # Ensure documents were saved globally on the membership
         self.assertEqual(membership.documents.count(), 1)
-    def test_add_artist_with_invalid_details_fails_validation(self):
+    def test_add_artist_with_invalid_details_fails_validation_when_toggle_is_on(self):
         self.login_as(self.founder)
         file = SimpleUploadedFile("dummy.pdf", b"file_content", content_type="application/pdf")
-        res = self.client.post(
-            reverse("teams:member-list-create", args=[self.team.id]),
-            data={
-                "user_id": self.other.id,
-                "role": "artist",
-                "details": json.dumps({
-                    # Missing required fields like business_email
-                    "agency_roster_url": "not a url",
-                }),
-                "documents": file
-            },
-        )
+        with mock.patch("apps.teams.serializers.ARTIST_ROLE_REQUIRES_DETAILS", True):
+            res = self.client.post(
+                reverse("teams:member-list-create", args=[self.team.id]),
+                data={
+                    "user_id": self.other.id,
+                    "role": "artist",
+                    "details": json.dumps({
+                        # Missing required fields like business_email
+                        "agency_roster_url": "not a url",
+                    }),
+                    "documents": file
+                },
+            )
         self.assertEqual(res.status_code, 400)
         errors = res.json()["error"]["details"]["details"]
         self.assertIn("agency_roster_url", errors)

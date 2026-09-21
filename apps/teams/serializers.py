@@ -8,7 +8,7 @@ from .models import (
     TeamInvitation,
     TeamMembership,
 )
-from .roles import ROLE_CHOICES, ArtistRole, TeamDomain, rank_of
+from .roles import ARTIST_ROLE_REQUIRES_DETAILS, ROLE_CHOICES, ArtistRole, TeamDomain, rank_of
 
 
 class TeamUserSerializer(serializers.Serializer):
@@ -175,15 +175,15 @@ class MemberAddSerializer(serializers.Serializer):
         if not isinstance(details, dict):
             raise serializers.ValidationError({"details": "Must be a JSON object."})
             
-        if role == ArtistRole.ARTIST.value:
+        if role == ArtistRole.ARTIST.value and ARTIST_ROLE_REQUIRES_DETAILS:
             details_serializer = ArtistDetailsInputSerializer(data=details)
             if not details_serializer.is_valid():
                 raise serializers.ValidationError({"details": details_serializer.errors})
-                
+
             attrs["details"] = details_serializer.validated_data
         else:
             attrs["details"] = {}
-            
+
         return attrs
 
 
@@ -252,15 +252,15 @@ class InvitationCreateSerializer(serializers.Serializer):
         if not isinstance(details, dict):
             raise serializers.ValidationError({"details": "Must be a JSON object."})
             
-        if role == ArtistRole.ARTIST.value:
+        if role == ArtistRole.ARTIST.value and ARTIST_ROLE_REQUIRES_DETAILS:
             details_serializer = ArtistDetailsInputSerializer(data=details)
             if not details_serializer.is_valid():
                 raise serializers.ValidationError({"details": details_serializer.errors})
-                
+
             attrs["details"] = details_serializer.validated_data
         else:
             attrs["details"] = {}
-            
+
         return attrs
 
 

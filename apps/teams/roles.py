@@ -22,6 +22,14 @@ configured at runtime.
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
+# Whether adding/inviting someone as ArtistRole.ARTIST requires the
+# agency/representation proof fields (agency_roster_url, confirmation_email,
+# etc. - see ArtistDetailsInputSerializer / ArtistRepresentationDetails).
+# Off for now: an artist is added just like any other role, no extra fields.
+# Flip to True to require them again - every call site that branches on
+# ArtistRole.ARTIST already reads this flag, no other code changes needed.
+ARTIST_ROLE_REQUIRES_DETAILS = False
+
 
 class TeamDomain(models.TextChoices):
     ARTIST = "artist", "Artist"
