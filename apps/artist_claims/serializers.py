@@ -97,4 +97,17 @@ class ClaimedArtistSearchResultSerializer(serializers.Serializer):
     artist_user_id = serializers.IntegerField(read_only=True, allow_null=True)
     seatgeek_performer_id = serializers.CharField(read_only=True, allow_null=True)
     name = serializers.CharField(read_only=True)
+    image = serializers.SerializerMethodField()
     claimed_by = serializers.ListField(read_only=True)
+
+    def get_image(self, obj: dict) -> str | None:
+        value = obj.get("image")
+        if not value:
+            return None
+        if value.startswith("http://") or value.startswith("https://"):
+            # A SeatGeek performer's `image` is already a full external URL.
+            return value
+        # A local user's `image.url` is storage-relative - resolve it the
+        # same way an ImageField would if there's a request to build against.
+        request = self.context.get("request")
+        return request.build_absolute_uri(value) if request else value

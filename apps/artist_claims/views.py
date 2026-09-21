@@ -76,7 +76,7 @@ class ClaimedArtistSearchView(GenericAPIView):
         return Response({
             "success": True,
             "count": len(rows),
-            "results": ClaimedArtistSearchResultSerializer(rows, many=True).data,
+            "results": ClaimedArtistSearchResultSerializer(rows, many=True, context={"request": request}).data,
         })
 
 

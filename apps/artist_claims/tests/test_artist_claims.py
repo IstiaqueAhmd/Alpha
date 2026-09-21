@@ -235,3 +235,36 @@ class ArtistClaimApiTests(ApiTestCase):
         body = res.json()
         self.assertEqual(body["count"], 1)
         self.assertEqual(len(body["results"][0]["claimed_by"]), 1)
+
+    def test_search_result_carries_the_artist_image(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.artist_user.image = SimpleUploadedFile("avatar.jpg", b"fake-image-bytes", content_type="image/jpeg")
+        self.artist_user.save(update_fields=["image"])
+        ArtistClaimService.create(claimant=self.claimant, artist_user_id=self.artist_user.pk, **claim_fields())
+
+        self.login_as(self.claimant)
+        res = self.client.get(reverse("artist_claims:claimed-artist-search"))
+        self.assertEqual(res.status_code, 200)
+        image_url = res.json()["results"][0]["image"]
+        self.assertIsNotNone(image_url)
+        self.assertIn("avatar", image_url)
+        self.assertTrue(image_url.startswith("http"))
+
+    def test_search_result_image_is_null_without_an_uploaded_avatar(self):
+        ArtistClaimService.create(claimant=self.claimant, artist_user_id=self.artist_user.pk, **claim_fields())
+        self.login_as(self.claimant)
+        res = self.client.get(reverse("artist_claims:claimed-artist-search"))
+        self.assertIsNone(res.json()["results"][0]["image"])
+
+    def test_search_result_carries_the_seatgeek_performer_image(self):
+        performer = make_performer("Image Band")
+        performer.image = "https://cdn.example.com/band.jpg"
+        performer.save(update_fields=["image"])
+        ArtistClaimService.create(claimant=self.claimant, seatgeek_performer_id=performer.pk, **claim_fields())
+
+        self.login_as(self.claimant)
+        res = self.client.get(reverse("artist_claims:claimed-artist-search"))
+        self.assertEqual(res.status_code, 200)
+        row = next(r for r in res.json()["results"] if r["source"] == "seatgeek")
+        self.assertEqual(row["image"], "https://cdn.example.com/band.jpg")

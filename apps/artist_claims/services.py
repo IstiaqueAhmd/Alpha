@@ -184,15 +184,22 @@ class ArtistClaimService:
             if claim.artist_user_id:
                 key = ("internal", str(claim.artist_user_id))
                 name = claim.artist_user.name
+                # User.image is an ImageField (storage-relative path) - a
+                # SeatGeek performer's is already a plain external URL
+                # string. The serializer resolves either into an absolute
+                # URL, so both are passed through as raw strings here.
+                image = claim.artist_user.image.url if claim.artist_user.image else None
             else:
                 key = ("seatgeek", claim.seatgeek_performer_id)
                 name = claim.seatgeek_performer.name
+                image = claim.seatgeek_performer.image or None
 
             entry = grouped.setdefault(key, {
                 "source": key[0],
                 "artist_user_id": claim.artist_user_id,
                 "seatgeek_performer_id": claim.seatgeek_performer_id,
                 "name": name,
+                "image": image,
                 "claimed_by": [],
             })
             entry["claimed_by"].append({
