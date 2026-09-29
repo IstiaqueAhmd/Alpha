@@ -16,6 +16,7 @@ env = environ.Env(
     OTP_MAX_ATTEMPTS=(int, 5),
     EMAIL_USE_TLS=(bool, True),
     CORS_ALLOWED_ORIGINS=(list, []),
+    MESSAGE_ENCRYPTION_KEYS=(list, []),
 )
 
 env_file = BASE_DIR / ".env"
@@ -200,6 +201,15 @@ CHANNEL_LAYERS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
 }
 CHAT_PRESENCE_BACKEND = "memory"
+
+# Message body encryption (apps.messaging.crypto.EncryptedTextField).
+# Comma-separated Fernet keys, each `Fernet.generate_key()` output. Index 0
+# is the ACTIVE key - all new/edited messages are encrypted with it. Any
+# key after index 0 is only kept so already-stored ciphertext can still be
+# decrypted; it's never used to encrypt. To rotate: generate a new key,
+# prepend it here, then run `manage.py reencrypt_messages` to migrate every
+# row onto the new key, and only then remove the old key from this list.
+MESSAGE_ENCRYPTION_KEYS = env("MESSAGE_ENCRYPTION_KEYS")
 
 LOGGING = {
     "version": 1,

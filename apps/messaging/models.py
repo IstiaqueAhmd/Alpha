@@ -3,6 +3,8 @@ from django.db import models
 
 from apps.common.models import TimeStampedModel
 
+from .crypto import EncryptedTextField
+
 
 class Conversation(TimeStampedModel):
     """A message thread: either a 1-to-1 DM or a named group.
@@ -142,7 +144,7 @@ class Message(TimeStampedModel):
             "event time, not live user references - a later rename shouldn't rewrite history."
         ),
     )
-    body = models.TextField(blank=True)
+    body = EncryptedTextField(blank=True)
     reply_to = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
